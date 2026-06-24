@@ -1,0 +1,29 @@
+#pragma once
+
+#include "ModelTypes.h"
+
+#include <QObject>
+#include <QString>
+#include <QVector>
+
+// Runs the whole export pipeline (STL slicing -> config.yaml -> python merge)
+// on a background thread so the UI stays responsive. Construct it with copies of
+// the data it needs, move it to a QThread, and connect to its signals.
+class SliceWorker : public QObject {
+    Q_OBJECT
+
+public:
+    SliceWorker(QVector<ModelInstance> models, SliceSettings settings, QObject* parent = nullptr);
+
+public slots:
+    void process();
+
+signals:
+    void logMessage(const QString& text);
+    // success == true means the full pipeline (including python) completed with exit code 0.
+    void finished(bool success, const QString& summary, const QString& outputDir);
+
+private:
+    QVector<ModelInstance> m_models;
+    SliceSettings m_settings;
+};

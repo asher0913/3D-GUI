@@ -1,0 +1,38 @@
+# Build output
+build/
+build-*/
+cmake-build-*/
+dist/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake.stamp
+
+# Qt generated
+*_autogen/
+ui_*.h
+moc_*.cpp
+qrc_*.cpp
+*.qm
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# macOS
+.DS_Store
+*.app/
+
+# Editor / IDE
+.idea/
+.vscode/
+*.user
+
+# Misc
+*.log
