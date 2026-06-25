@@ -42,22 +42,34 @@ void SliceWorker::process()
         return;
     }
 
-    if (!QFileInfo::exists(m_settings.mergeScriptPath)) {
-        emit finished(false, QStringLiteral("Cannot find merge script: %1").arg(m_settings.mergeScriptPath), outputDir);
+    const QString tool = m_settings.mergeToolPath;
+    if (tool.trimmed().isEmpty() || !QFileInfo::exists(tool)) {
+        emit finished(false, QStringLiteral("找不到后端工具: %1").arg(tool), outputDir);
         return;
     }
 
-    emit logMessage(QStringLiteral("Running merge script..."));
+    // Production mode runs the backend executable directly. Development mode allows
+    // a `.py` script, run through the configured Python interpreter.
+    const bool devMode = tool.endsWith(QStringLiteral(".py"), Qt::CaseInsensitive);
+    QString program;
+    QStringList args;
+    if (devMode) {
+        program = m_settings.pythonPath.isEmpty() ? QStringLiteral("python3") : m_settings.pythonPath;
+        args << tool;
+        emit logMessage(QStringLiteral("开发模式：通过 Python 运行后端脚本 %1").arg(tool));
+    } else {
+        program = tool;
+        emit logMessage(QStringLiteral("正式模式：运行后端命令行工具 %1").arg(tool));
+    }
+    args << QStringLiteral("--config") << configPath
+         << QStringLiteral("--output") << mergedDir;
 
     QProcess process;
-    process.setProgram(m_settings.pythonPath);
-    process.setArguments(QStringList()
-                         << m_settings.mergeScriptPath
-                         << QStringLiteral("--config") << configPath
-                         << QStringLiteral("--output") << mergedDir);
+    process.setProgram(program);
+    process.setArguments(args);
     process.start();
     if (!process.waitForStarted()) {
-        emit finished(false, QStringLiteral("Python failed: %1").arg(process.errorString()), outputDir);
+        emit finished(false, QStringLiteral("后端工具启动失败: %1").arg(process.errorString()), outputDir);
         return;
     }
     process.waitForFinished(-1);

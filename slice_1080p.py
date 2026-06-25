@@ -40,6 +40,7 @@ DEFAULT_CONFIG = {
     "dry_time_bottom": 210,
     "dry_time_standard": 200,
     "pre_z_height": 10,
+    "slider_height": 5,
     "drop_time_bottom": 20,
     "drop_layers_bottom": 20,
     "drop_time_standard": 10,

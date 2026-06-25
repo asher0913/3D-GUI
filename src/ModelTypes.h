@@ -1,5 +1,6 @@
 #pragma once
 
+#include "PresetLibrary.h"
 #include "StlMesh.h"
 
 #include <QColor>
@@ -35,26 +36,42 @@ struct ModelInstance {
     bool visible = true;
 };
 
-// Exposure parameters that can differ per material.
+// Exposure parameters that can differ per material slot.
+// The UI works in "light strength"; the machine current is derived from strength
+// via the selected machine's strength/current map at export time.
 struct MaterialExposure {
+    QString presetId;  // chosen material preset for this slot (optional)
     double bottomExposureTime = 7.0;
-    int bottomExposureCurrent = 15;
+    double bottomExposureStrength = 0.0;
     double standardExposureTime = 2.5;
-    int standardExposureCurrent = 15;
+    double standardExposureStrength = 0.0;
 };
 
 struct SliceSettings {
-    int outputWidth = 1920;
-    int outputHeight = 1080;
+    int outputWidth = 3840;
+    int outputHeight = 2160;
     double pixelSizeMm = 0.05;
     double layerHeightMm = 0.05;
-    int materialCount = 2;
+    int materialCount = 3;
+
+    // Selected machine; selectedMachine carries the strength->current map so the
+    // background worker can convert without touching the UI.
+    QString selectedMachineName;
+    MachinePreset selectedMachine;
 
     int bottomLayers = 3;
-    // One entry per material; size is kept in sync with materialCount.
+    // One entry per material slot; size is kept in sync with materialCount.
     QVector<MaterialExposure> materials;
 
+    // Advanced options (written verbatim into config.yaml for the backend).
+    bool groove = false;
+    bool slide0 = false;
+    bool slide1 = false;
+    bool slide2 = false;
+
+    // Backend command-line tool. In production this is an executable; in dev mode
+    // it may be a `.py` script, in which case pythonPath is used to run it.
+    QString mergeToolPath;
     QString pythonPath = QStringLiteral("python3");
-    QString mergeScriptPath;
     QString outputDir;
 };

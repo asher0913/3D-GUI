@@ -6,7 +6,7 @@
 #include <QString>
 #include <QVector>
 
-// Runs the whole export pipeline (STL slicing -> config.yaml -> python merge)
+// Runs the whole export pipeline (STL slicing -> config.yaml -> backend merge)
 // on a background thread so the UI stays responsive. Construct it with copies of
 // the data it needs, move it to a QThread, and connect to its signals.
 class SliceWorker : public QObject {
@@ -20,7 +20,7 @@ public slots:
 
 signals:
     void logMessage(const QString& text);
-    // success == true means the full pipeline (including python) completed with exit code 0.
+    // success == true means the full pipeline (including the backend) completed with exit code 0.
     void finished(bool success, const QString& summary, const QString& outputDir);
 
 private:

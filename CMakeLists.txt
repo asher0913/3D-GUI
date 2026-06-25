@@ -28,6 +28,9 @@ add_executable(MultiMaterialSlicer
     src/ConfigWriter.h
     src/SliceWorker.cpp
     src/SliceWorker.h
+    src/PresetLibrary.h
+    src/PresetLoader.cpp
+    src/PresetLoader.h
     ui/MainWindow.ui
     resources/resources.qrc
 )
@@ -39,6 +42,15 @@ target_include_directories(MultiMaterialSlicer PRIVATE
 
 target_link_libraries(MultiMaterialSlicer PRIVATE Qt5::Widgets Qt5::OpenGL)
 
+set(PRESET_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/config/machine_material_presets.yaml)
+if(WIN32)
+    set(BACKEND_TOOL ${CMAKE_CURRENT_SOURCE_DIR}/backend_dist/slice_merge_tool.exe)
+    set(BACKEND_OUTPUT_NAME slice_merge_tool.exe)
+else()
+    set(BACKEND_TOOL ${CMAKE_CURRENT_SOURCE_DIR}/backend_dist/slice_merge_tool)
+    set(BACKEND_OUTPUT_NAME slice_merge_tool)
+endif()
+
 if(APPLE)
     set_target_properties(MultiMaterialSlicer PROPERTIES
         MACOSX_BUNDLE TRUE
@@ -46,17 +58,42 @@ if(APPLE)
         MACOSX_BUNDLE_BUNDLE_NAME MultiMaterialSlicer
         MACOSX_BUNDLE_BUNDLE_VERSION 0.1.0
         MACOSX_BUNDLE_SHORT_VERSION_STRING 0.1.0)
+    # Non-code resources stay in Resources. The executable backend helper lives
+    # under MacOS because recent macOS releases can kill helper executables when
+    # they are launched from Contents/Resources.
     add_custom_command(TARGET MultiMaterialSlicer POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            $<TARGET_BUNDLE_CONTENT_DIR:MultiMaterialSlicer>/Resources
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_CURRENT_SOURCE_DIR}/slice_1080p.py
-            $<TARGET_BUNDLE_CONTENT_DIR:MultiMaterialSlicer>/MacOS/slice_1080p.py
+            $<TARGET_BUNDLE_CONTENT_DIR:MultiMaterialSlicer>/Resources/slice_1080p.py
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${PRESET_CONFIG}
+            $<TARGET_BUNDLE_CONTENT_DIR:MultiMaterialSlicer>/Resources/machine_material_presets.yaml
     )
+    if(EXISTS ${BACKEND_TOOL})
+        add_custom_command(TARGET MultiMaterialSlicer POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${BACKEND_TOOL}
+                $<TARGET_BUNDLE_CONTENT_DIR:MultiMaterialSlicer>/MacOS/slice_merge_tool
+        )
+    endif()
 else()
     add_custom_command(TARGET MultiMaterialSlicer POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_CURRENT_SOURCE_DIR}/slice_1080p.py
             $<TARGET_FILE_DIR:MultiMaterialSlicer>/slice_1080p.py
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${PRESET_CONFIG}
+            $<TARGET_FILE_DIR:MultiMaterialSlicer>/machine_material_presets.yaml
     )
+    if(EXISTS ${BACKEND_TOOL})
+        add_custom_command(TARGET MultiMaterialSlicer POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${BACKEND_TOOL}
+                $<TARGET_FILE_DIR:MultiMaterialSlicer>/${BACKEND_OUTPUT_NAME}
+        )
+    endif()
 endif()
 
 if(WIN32)

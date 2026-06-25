@@ -139,7 +139,7 @@ void OpenGLView::drawBackground()
     glDisable(GL_DEPTH_TEST);
 
     // Two triangles covering NDC, darker at the top fading to a slightly warmer/
-    // bluer charcoal at the bottom — a subtle studio-style gradient.
+    // bluer charcoal at the bottom; a subtle studio-style gradient.
     const QVector3D top(0.066f, 0.074f, 0.090f);
     const QVector3D bottom(0.110f, 0.130f, 0.160f);
     const float positions[6][2] = {
