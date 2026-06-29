@@ -3,20 +3,23 @@
 #
 # Builds:
 #   1. The backend tool  slice_merge_tool.exe  (PyInstaller, no Python needed at runtime)
-#   2. The Qt application MultiMaterialSlicer.exe
-#   3. Collects Qt DLLs (windeployqt), embeds the backend + config
-#   4. Produces dist\MultiMaterialSlicer-win64.zip  (give ONLY this to customers)
+#   2. The STEP converter  step_to_stl_parts.exe  (PyInstaller + CadQuery/OCP)
+#   3. The Qt application MultiMaterialSlicer.exe
+#   4. Collects Qt DLLs (windeployqt), embeds tools + config + examples
+#   5. Produces dist\MultiMaterialSlicer-win64.zip  (give ONLY this to customers)
 #
 # Usage (or just double-click build_windows.bat):
 #   powershell -ExecutionPolicy Bypass -File scripts\package_windows.ps1
 #   ...optional overrides:
-#   -QtPrefix C:\Qt\5.12.12\msvc2017_64  -Python py  -SkipBackend
+#   -QtPrefix C:\Qt\5.12.12\msvc2017_64  -Python C:\Python312\python.exe  -RunSelfTest
 # =====================================================================
 param(
     [string]$QtPrefix = "",
     [string]$Generator = "",
     [string]$Python = "",
-    [switch]$SkipBackend
+    [switch]$SkipBackend,
+    [switch]$SkipStepTool,
+    [switch]$RunSelfTest
 )
 
 $ErrorActionPreference = "Stop"
@@ -74,6 +77,7 @@ Info "Generator: $Generator"
 
 # ---- 1. Backend tool (PyInstaller) ----------------------------------
 $BackendExe = Join-Path $Root "backend_dist\slice_merge_tool.exe"
+$StepExe = Join-Path $Root "backend_dist\step_to_stl_parts.exe"
 if ($SkipBackend) {
     Info "Skipping backend build (-SkipBackend)."
 } else {
@@ -86,6 +90,19 @@ if ($SkipBackend) {
 if (-not (Test-Path $BackendExe)) {
     Write-Host "WARNING: $BackendExe not found." -ForegroundColor Yellow
     Write-Host "         The app will be built without an embedded backend (dev mode only)." -ForegroundColor Yellow
+}
+
+if ($SkipStepTool) {
+    Info "Skipping STEP converter build (-SkipStepTool)."
+} else {
+    Info "==> Building STEP converter (step_to_stl_parts.exe) ..."
+    $sargs = @()
+    if ($Python) { $sargs += @("-Python", $Python) }
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "package_step_windows.ps1") @sargs
+    if ($LASTEXITCODE -ne 0) { Fail "STEP converter build failed. Is Python 3 installed and on PATH?" }
+}
+if (-not (Test-Path $StepExe)) {
+    Write-Host "WARNING: $StepExe not found. STEP import will require Python + OCP/CadQuery at runtime." -ForegroundColor Yellow
 }
 
 # ---- 2. Configure + build the app -----------------------------------
@@ -116,7 +133,57 @@ if ($LASTEXITCODE -ne 0) { Fail "windeployqt failed." }
 
 # Make sure backend + config are present (defensive; CMake already copies them).
 if (Test-Path $BackendExe) { Copy-Item $BackendExe (Join-Path $Stage "slice_merge_tool.exe") -Force }
+if (Test-Path $StepExe) { Copy-Item $StepExe (Join-Path $Stage "step_to_stl_parts.exe") -Force }
 Copy-Item (Join-Path $Root "config\machine_material_presets.yaml") $Stage -Force
+
+# Include demo files for meeting/customer smoke tests. They are small and make a
+# clean Windows machine immediately demonstrable after unzipping the package.
+$ExamplesDir = Join-Path $Stage "examples"
+New-Item -ItemType Directory -Path $ExamplesDir -Force | Out-Null
+if (Test-Path (Join-Path $Root "demo_stl")) {
+    Copy-Item (Join-Path $Root "demo_stl") (Join-Path $ExamplesDir "demo_stl") -Recurse -Force
+}
+if (Test-Path (Join-Path $Root "demo_step")) {
+    Copy-Item (Join-Path $Root "demo_step") (Join-Path $ExamplesDir "demo_step") -Recurse -Force
+}
+
+# Smoke-check packaged command-line helpers and critical runtime files before
+# zipping, so a missing backend/STEP tool is caught on the build machine.
+$RequiredFiles = @(
+    "MultiMaterialSlicer.exe",
+    "machine_material_presets.yaml",
+    "platforms\qwindows.dll"
+)
+if (-not $SkipBackend) { $RequiredFiles += "slice_merge_tool.exe" }
+if (-not $SkipStepTool) { $RequiredFiles += "step_to_stl_parts.exe" }
+foreach ($rel in $RequiredFiles) {
+    $path = Join-Path $Stage $rel
+    if (-not (Test-Path $path)) { Fail "Required packaged file is missing: $path" }
+}
+
+if (-not $SkipBackend) {
+    & (Join-Path $Stage "slice_merge_tool.exe") --help | Out-Null
+    if ($LASTEXITCODE -ne 0) { Fail "Packaged slice_merge_tool.exe failed to start." }
+}
+if (-not $SkipStepTool) {
+    & (Join-Path $Stage "step_to_stl_parts.exe") --help | Out-Null
+    if ($LASTEXITCODE -ne 0) { Fail "Packaged step_to_stl_parts.exe failed to start." }
+}
+
+if ($RunSelfTest) {
+    Info "==> Running packaged app self-test ..."
+    $stepExample = Join-Path $Stage "examples\demo_step\step示例.step"
+    $stlA = Join-Path $Stage "examples\demo_stl\multi_A_base_plate.stl"
+    $stlB = Join-Path $Stage "examples\demo_stl\multi_B_cross_insert.stl"
+    if ((Test-Path $stepExample) -and -not $SkipStepTool) {
+        & (Join-Path $Stage "MultiMaterialSlicer.exe") --selftest $stepExample
+    } elseif ((Test-Path $stlA) -and (Test-Path $stlB)) {
+        & (Join-Path $Stage "MultiMaterialSlicer.exe") --selftest $stlA $stlB
+    } else {
+        Fail "No packaged examples found for self-test."
+    }
+    if ($LASTEXITCODE -ne 0) { Fail "Packaged app self-test failed." }
+}
 
 # ---- 4. Zip ----------------------------------------------------------
 Info "==> Creating zip ..."

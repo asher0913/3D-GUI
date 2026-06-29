@@ -4,8 +4,10 @@
 #include "StlMesh.h"
 
 #include <QColor>
+#include <QMap>
 #include <QMatrix4x4>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 #include <QVector3D>
 
@@ -34,6 +36,13 @@ struct ModelInstance {
     int materialIndex = 0;
     QColor color = QColor(44, 160, 220);
     bool visible = true;
+
+    // STEP assemblies are represented as one tree parent plus several leaf
+    // models. Each leaf keeps its own material, while the parent transform is
+    // copied to all leaves so the assembly moves as a single object.
+    bool isAssemblyChild = false;
+    QString assemblyId;
+    QString assemblyName;
 };
 
 // Exposure parameters that can differ per material slot.
@@ -46,6 +55,66 @@ struct MaterialExposure {
     double standardExposureTime = 2.5;
     double standardExposureStrength = 0.0;
 };
+
+struct AdvancedConfigParam {
+    QString key;
+    QString defaultValue;
+    bool quoteValue = false;
+};
+
+inline QVector<AdvancedConfigParam> defaultAdvancedConfigParams()
+{
+    return {
+        { QStringLiteral("back_distance"), QStringLiteral("5"), false },
+        { QStringLiteral("slider_height"), QStringLiteral("5"), false },
+        { QStringLiteral("max_height"), QStringLiteral("165"), false },
+        { QStringLiteral("min_height"), QStringLiteral("-50"), false },
+        { QStringLiteral("z_acc_h"), QStringLiteral("100.0"), false },
+        { QStringLiteral("z_dec_h"), QStringLiteral("-100.0"), false },
+        { QStringLiteral("z_speed_h"), QStringLiteral("450.0"), false },
+        { QStringLiteral("z_acc_l"), QStringLiteral("50.0"), false },
+        { QStringLiteral("z_dec_l"), QStringLiteral("-50.0"), false },
+        { QStringLiteral("z_speed_l"), QStringLiteral("100.0"), false },
+        { QStringLiteral("r_acc"), QStringLiteral("60.0"), false },
+        { QStringLiteral("r_dec"), QStringLiteral("-60.0"), false },
+        { QStringLiteral("r_speed"), QStringLiteral("120.0"), false },
+        { QStringLiteral("clean_tank"), QStringLiteral("3"), false },
+        { QStringLiteral("clean_tank_height"), QStringLiteral("20"), false },
+        { QStringLiteral("clean_height"), QStringLiteral("25"), false },
+        { QStringLiteral("clean_height_coefficient"), QStringLiteral("0.95"), false },
+        { QStringLiteral("clean_times"), QStringLiteral("3"), false },
+        { QStringLiteral("clean_time"), QStringLiteral("5.0"), false },
+        { QStringLiteral("clean_distance"), QStringLiteral("10"), false },
+        { QStringLiteral("dry_tank"), QStringLiteral("4"), false },
+        { QStringLiteral("dry_height"), QStringLiteral("60"), false },
+        { QStringLiteral("dry_time_bottom"), QStringLiteral("210"), false },
+        { QStringLiteral("dry_time_standard"), QStringLiteral("200"), false },
+        { QStringLiteral("pre_z_height"), QStringLiteral("10"), false },
+        { QStringLiteral("drop_time_bottom"), QStringLiteral("20"), false },
+        { QStringLiteral("drop_layers_bottom"), QStringLiteral("20"), false },
+        { QStringLiteral("drop_time_standard"), QStringLiteral("10"), false },
+        { QStringLiteral("ASS"), QStringLiteral("false"), false },
+        { QStringLiteral("ASS_times"), QStringLiteral("100"), false },
+        { QStringLiteral("ASS_volume"), QStringLiteral("470"), false },
+        { QStringLiteral("AMS"), QStringLiteral("false"), false },
+        { QStringLiteral("AMS0_layers"), QStringLiteral("-1 -1"), true },
+        { QStringLiteral("AMS1_layers"), QStringLiteral("-1 -1"), true },
+        { QStringLiteral("AMS2_layers"), QStringLiteral("-1 -1"), true },
+        { QStringLiteral("AMS_tank_offset"), QStringLiteral("2.5"), false },
+        { QStringLiteral("AMS_volume"), QStringLiteral("30"), false },
+        { QStringLiteral("plate_rotate_height"), QStringLiteral("140"), false },
+        { QStringLiteral("glass_rotate_height"), QStringLiteral("-50"), false },
+        { QStringLiteral("lapse"), QStringLiteral("false"), false },
+        { QStringLiteral("lapse_height"), QStringLiteral("160"), false },
+        { QStringLiteral("lapse_tank"), QStringLiteral("0"), false },
+        { QStringLiteral("alpha"), QStringLiteral("false"), false },
+        { QStringLiteral("beta"), QStringLiteral("false"), false },
+        { QStringLiteral("block_size"), QStringLiteral("16"), false },
+        { QStringLiteral("wait_after_exposure"), QStringLiteral("0.5"), false },
+        { QStringLiteral("wait_before_exposure"), QStringLiteral("0.5"), false },
+        { QStringLiteral("finished_clean"), QStringLiteral("false"), false },
+    };
+}
 
 struct SliceSettings {
     int outputWidth = 3840;
@@ -68,6 +137,10 @@ struct SliceSettings {
     bool slide0 = false;
     bool slide1 = false;
     bool slide2 = false;
+
+    // Machine/GCode advanced parameters. Values are kept as strings so manually
+    // imported config.yaml files can round-trip uncommon numeric/bool formats.
+    QMap<QString, QString> advancedParams;
 
     // Backend command-line tool. In production this is an executable; in dev mode
     // it may be a `.py` script, in which case pythonPath is used to run it.

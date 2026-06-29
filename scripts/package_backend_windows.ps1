@@ -1,7 +1,7 @@
 # Build the backend command-line tool (slice_merge_tool.exe) from slice_1080p.py
 # using PyInstaller, so the App does not depend on a Python install at runtime.
 param(
-    [string]$Python = "py",
+    [string]$Python = "",
     [string]$VenvDir = ""
 )
 
@@ -11,12 +11,49 @@ if ([string]::IsNullOrWhiteSpace($VenvDir)) {
     $VenvDir = Join-Path $Root "backend_build\venv"
 }
 
+function Invoke-HostPython {
+    param([string[]]$PythonArgs)
+
+    if (-not [string]::IsNullOrWhiteSpace($Python)) {
+        & $Python @PythonArgs
+        return $LASTEXITCODE
+    }
+
+    $candidates = @(
+        @("py", "-3.12"),
+        @("py", "-3.11"),
+        @("py", "-3.10"),
+        @("python")
+    )
+    foreach ($candidate in $candidates) {
+        $exe = $candidate[0]
+        if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) { continue }
+        $prefix = @()
+        if ($candidate.Count -gt 1) {
+            $prefix = $candidate[1..($candidate.Count - 1)]
+        }
+        & $exe @prefix @PythonArgs
+        if ($LASTEXITCODE -eq 0) { return 0 }
+    }
+    return 1
+}
+
 Push-Location $Root
-& $Python -m venv $VenvDir
+if ((Invoke-HostPython @("-m", "venv", $VenvDir)) -ne 0) {
+    throw "Could not create Python venv. Install Python 3.10-3.12, or pass -Python C:\Path\To\python.exe."
+}
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
+if (-not (Test-Path $VenvPython)) {
+    throw "Venv python not found at $VenvPython"
+}
+& $VenvPython -c "import sys; print('Python ' + sys.version.split()[0])"
 & $VenvPython -m pip install --upgrade pip
-& $VenvPython -m pip install --upgrade pyinstaller opencv-python numpy pyyaml
+& $VenvPython -m pip install --upgrade --force-reinstall pyinstaller altgraph
+& $VenvPython -m pip install --upgrade opencv-python numpy
+& $VenvPython -m pip install --force-reinstall --no-cache-dir "PyYAML==6.0.2"
 & $VenvPython -m PyInstaller --clean --onefile --name slice_merge_tool `
+    --hidden-import yaml `
+    --collect-submodules yaml `
     --distpath (Join-Path $Root "backend_dist") `
     --workpath (Join-Path $Root "backend_build") `
     --specpath (Join-Path $Root "backend_build") `

@@ -191,3 +191,11 @@ void StlMesh::normalizeToBuildPlateOrigin()
     }
     updateBounds();
 }
+
+void StlMesh::translate(const QVector3D& offset)
+{
+    for (QVector3D& v : m_vertices) {
+        v += offset;
+    }
+    updateBounds();
+}

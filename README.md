@@ -1,18 +1,23 @@
 # MultiMaterialSlicer
 
-MultiMaterialSlicer 是一个面向多材料光固化打印机的 Qt/C++ 桌面 APP。当前版本把原先的“Chitubox 切片导出多个文件夹，再用 Python 合并”的流程整合到一个应用里：在 APP 中导入多个 STL、设置模型变换和材料、按材料导出 PNG 切片、生成 `config.yaml`，再调用后端命令行工具生成最终 `run.gcode` 和合并后的图像文件。
+MultiMaterialSlicer 是一个面向多材料光固化打印机的 Qt/C++ 桌面 APP。当前版本把原先的“Chitubox 切片导出多个文件夹，再用 Python 合并”的流程整合到一个应用里：在 APP 中导入多个 STL 或 STEP 装配体、设置模型变换和材料、按材料导出 PNG 切片、生成 `config.yaml`，再调用后端命令行工具生成最终 `run.gcode` 和合并后的图像文件。
 
 当前代码重点面向 Windows 可用、macOS 可演示、Linux 后续可迁移的路线。界面使用 Qt 5.12.12 和 `.ui` 文件，3D 视图使用轻量的 `QOpenGLWidget`。
 
 ## 当前能力
 
-- 左侧 3D 视图可以显示多个 STL 模型。
+- 左侧 3D 视图可以显示多个 STL 模型，也可以导入 STEP/STP 装配体。
+- STEP 导入会拆出多个子实体，在模型树中显示为“STEP 文件父节点 -> 子实体叶子节点”。
+- 选中 STEP 父节点时，平移、旋转、缩放会作为整体应用到所有子实体；选中子实体时，可以单独设置材料，但不单独破坏装配体相对位置。
 - 选中模型后可以在右侧输入平移、旋转、等比例缩放数值。
 - 选中模型后可以复制，复制件保留网格、变换、材料和颜色。
 - 每个模型可以分配材料槽，默认材料数量为 3，用户可以调整材料数量。
 - 材料参数 UI 使用“光强”表述，不再显示“电流”。配置和 GCode 需要的电流值由机器/材料库中的光强到电流映射计算。
 - 机器与材料参数从 `config/machine_material_presets.yaml` 读取。读不到配置库时，APP 会要求用户选择配置文件；仍然无法读取时会禁用主要操作。
-- 切片高级选项包含“挡板 (groove)”和“刮板1/2/3 (slide_0/1/2)”。
+- 切片页顶部包含打印设置，模型页只保留模型导入、选择、复制、删除和变换。
+- 切片常规选项包含“挡板 (groove)”和“刮板1/2/3 (slide_0/1/2)”。
+- 切片高级选项包含 `max_height`、`z_acc_h`、`clean_tank`、`dry_tank`、`drop_time_bottom`、`ASS_times` 等后端机器/GCode 参数。
+- 可以从手动编辑的 `config.yaml` 导入参数，回填打印设置、曝光设置、常规选项和高级选项。
 - 后端以命令行工具形式运行：macOS 为 `slice_merge_tool`，Windows 为 `slice_merge_tool.exe`。开发模式仍保留 `slice_1080p.py --config ... --output ...`。
 - APP 主窗口已经改为可调节大小。
 - 打包脚本会把 Qt 运行库、预设库和后端工具一起放进发布包。
@@ -31,16 +36,21 @@ MultiMaterialSlicer 是一个面向多材料光固化打印机的 Qt/C++ 桌面 
 │   ├── 04_three_towers.stl
 │   ├── multi_A_base_plate.stl
 │   └── multi_B_cross_insert.stl
+├── demo_step/
+│   └── step示例.step
 ├── resources/
 ├── scripts/
 │   ├── package_backend_macos.sh
 │   ├── package_backend_windows.ps1
+│   ├── package_step_macos.sh
+│   ├── package_step_windows.ps1
 │   ├── package_macos.sh
 │   └── package_windows.ps1
 ├── slice_1080p.py
 ├── src/
 ├── tools/
-│   └── generate_demo_stls.py
+│   ├── generate_demo_stls.py
+│   └── step_to_stl_parts.py
 └── ui/
     └── MainWindow.ui
 ```
@@ -67,26 +77,52 @@ dist/MultiMaterialSlicer-mac-x86_64.zip
 
 注意：仓库放在 iCloud Drive 下时，直接运行 `./scripts/package_macos.sh` 有时会遇到脚本执行或扩展属性问题，因此推荐使用 `bash scripts/package_macos.sh`。脚本内部会清理 iCloud 文件属性，并进行 ad-hoc 签名。
 
-当前 macOS 包默认是 x86_64。Apple Silicon 机器可以通过 Rosetta 运行。如果后续要生成 arm64 或 universal 包，可以把 `scripts/package_backend_macos.sh` 和 `scripts/package_macos.sh` 扩展成多架构产物。
+当前 macOS GUI 包默认是 x86_64。Apple Silicon 机器可以通过 Rosetta 运行。STEP 转换器 `step_to_stl_parts` 会在本机用 CadQuery/OCP 打包，当前这台 Apple Silicon 机器生成的是 arm64 helper，x86_64 GUI 可以正常启动该 helper。若要给 Intel Mac 分发 STEP 导入能力，应在 Intel Mac 或 x86_64 Python 环境中重新运行 `scripts/package_step_macos.sh`。
 
 ## Windows 打包
 
-在 Windows 上安装 Qt 5.12.12、CMake、Visual Studio C++ 工具链和 Python 后运行：
+在 Windows 上安装 Qt 5.12.12、CMake、Visual Studio C++ 工具链和 Python 3.10/3.11/3.12 后运行。STEP 转换器依赖 CadQuery/OCP，建议安装 Python 3.12 并勾选 “Add Python to PATH”：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\package_windows.ps1 -QtPrefix C:\Qt\5.12.12\msvc2017_64
 ```
 
-脚本会默认先构建 `backend_dist\slice_merge_tool.exe`，然后编译 Qt APP，调用 `windeployqt.exe`，最后生成：
+脚本会默认先构建 `backend_dist\slice_merge_tool.exe` 和 `backend_dist\step_to_stl_parts.exe`，然后编译 Qt APP，调用 `windeployqt.exe`，检查必需文件和 helper 是否能启动，最后生成：
 
 ```text
 dist\MultiMaterialSlicer-win64.zip
+```
+
+会议前在 Windows 展示机上建议加 `-RunSelfTest`，让打包脚本直接运行包内 STEP 示例自检：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\package_windows.ps1 -QtPrefix C:\Qt\5.12.12\msvc2017_64 -RunSelfTest
+```
+
+生成的 Windows 发布目录会包含：
+
+```text
+dist\MultiMaterialSlicer-win64\
+├── MultiMaterialSlicer.exe
+├── slice_merge_tool.exe
+├── step_to_stl_parts.exe
+├── machine_material_presets.yaml
+├── platforms\qwindows.dll
+└── examples\
+    ├── demo_stl\
+    └── demo_step\
 ```
 
 如果只想单独打包后端：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\package_backend_windows.ps1
+```
+
+如果只想单独打包 STEP 转换器：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\package_step_windows.ps1
 ```
 
 ## 后端工具
@@ -103,7 +139,15 @@ slice_merge_tool --config <config.yaml> --output <merged_output_dir>
 python3 slice_1080p.py --config <config.yaml> --output <merged_output_dir>
 ```
 
-后端会读取 APP 生成的 `config.yaml`，读取每个材料文件夹中的 PNG，按照材料切换、曝光、挡板和刮板参数生成最终输出。
+后端会读取 APP 生成的 `config.yaml`，读取每个材料文件夹中的 PNG，按照材料切换、曝光、挡板、刮板和高级机器参数生成最终输出。
+
+STEP 导入使用另一个可替换命令行工具：
+
+```bash
+step_to_stl_parts --input <model.step> --output <parts_dir>
+```
+
+它会输出 `manifest.json` 和每个子实体对应的 STL。默认实现是 `tools/step_to_stl_parts.py`，使用 CadQuery wheel 中的 OCP/OpenCascade 内核；发布包优先调用打包后的 `step_to_stl_parts` / `step_to_stl_parts.exe`。
 
 ## 输出结构
 
@@ -137,10 +181,14 @@ output/
 - `bash scripts/package_macos.sh` 可以生成自包含 zip 包。
 - 解压后的 `MultiMaterialSlicer.app` 通过 `codesign --verify --deep --strict`。
 - 后端 `slice_merge_tool --help` 可以正常运行。
-- APP 内置 `--selftest` 可以导入 STL、设置材料、导出切片、生成 `config.yaml` 和 `run.gcode`。
-- 使用 Computer Use 实际打开最终打包 APP，完成了模型导入、材料修改、数值变换、复制模型、切换切片页、勾选挡板和刮板、点击生成、确认成功弹窗、检查输出文件的流程。
+- APP 内置 `--selftest` 可以导入 STL/STEP、设置材料、导出切片、生成 `config.yaml` 和 `run.gcode`。
+- `tools/step_to_stl_parts.py` 已用 `demo_step/step示例.step` 实测，可拆出 2 个子实体。
+- 打包后的 `backend_dist/step_to_stl_parts` 已实测可直接转换 `demo_step/step示例.step`。
+- APP 内置 `--selftest demo_step/step示例.step` 已实测通过：导入 STEP、拆 2 个子实体、切片、生成 `config.yaml` 和 `run.gcode`。
+- 使用 Computer Use 实际打开最终打包 APP，完成了模型导入、材料修改、数值变换、复制模型、切换切片页、勾选挡板和刮板、点击生成、确认成功弹窗、检查输出文件的流程。此后又新增了切片页打印设置、高级参数表和 `config.yaml` 导入入口。
+- 使用 Computer Use 实际打开当前构建 APP，确认 STEP 树显示 `step示例.step -> 实体1/实体2`，第二个子实体材料可改为 2，父节点 X 位移可整体移动装配体。
 
-Computer Use 对 macOS 原生文件选择器控制不稳定，所以自动化测试中使用启动参数导入 STL 来覆盖同一套导入代码。人工演示时，“导入 STL”按钮会打开系统文件选择器，可以正常选择 `demo_stl` 中的 STL 文件。
+Computer Use 对 macOS 原生文件选择器控制不稳定，所以自动化测试中使用启动参数导入 STL/STEP 来覆盖同一套导入代码。人工演示时，“导入 STL”和“导入 STEP”按钮会打开系统文件选择器，可以正常选择 `demo_stl` 中的 STL 文件和 `demo_step` 中的 STEP 文件。
 
 ## 快速演示模型
 
@@ -156,3 +204,11 @@ demo_stl/multi_B_cross_insert.stl
 ```
 
 会议演示建议使用 `multi_A_base_plate.stl` 和 `multi_B_cross_insert.stl`，一个设为材料1，一个设为材料2，再复制其中一个模型并改为材料3，能比较直观展示多材料工作流。
+
+STEP 装配体演示文件：
+
+```text
+demo_step/step示例.step
+```
+
+导入后模型树会显示一个 STEP 父节点和两个子实体。建议把 `实体2` 的材料列从 1 改成 2，再选中父节点调整 X/Y/旋转，展示“父级整体移动、子实体独立材料”的流程。

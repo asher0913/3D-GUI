@@ -18,9 +18,19 @@ cd "$ROOT_DIR"
 
 "${ARCH_CMD[@]}" "$PYTHON" -m venv "$VENV_DIR"
 VENV_PYTHON="$VENV_DIR/bin/python"
+if ! "${ARCH_CMD[@]}" "$VENV_PYTHON" -m pip --version >/dev/null 2>&1; then
+    echo "Existing backend venv has no working pip; recreating $VENV_DIR"
+    rm -rf "$VENV_DIR"
+    "${ARCH_CMD[@]}" "$PYTHON" -m venv "$VENV_DIR"
+    VENV_PYTHON="$VENV_DIR/bin/python"
+fi
 "${ARCH_CMD[@]}" "$VENV_PYTHON" -m pip install --upgrade pip >/dev/null
-"${ARCH_CMD[@]}" "$VENV_PYTHON" -m pip install --upgrade pyinstaller opencv-python numpy pyyaml >/dev/null
+"${ARCH_CMD[@]}" "$VENV_PYTHON" -m pip install --upgrade --force-reinstall pyinstaller altgraph >/dev/null
+"${ARCH_CMD[@]}" "$VENV_PYTHON" -m pip install --upgrade opencv-python numpy >/dev/null
+"${ARCH_CMD[@]}" "$VENV_PYTHON" -m pip install --force-reinstall --no-cache-dir "PyYAML==6.0.2" >/dev/null
 "${ARCH_CMD[@]}" "$VENV_PYTHON" -m PyInstaller --clean --onefile --target-architecture "$BACKEND_ARCH" --name slice_merge_tool \
+    --hidden-import yaml \
+    --collect-submodules yaml \
     --distpath "$ROOT_DIR/backend_dist" \
     --workpath "$ROOT_DIR/backend_build" \
     --specpath "$ROOT_DIR/backend_build" \

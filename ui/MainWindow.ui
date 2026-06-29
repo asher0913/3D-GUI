@@ -113,6 +113,13 @@
                    </widget>
                   </item>
                   <item>
+                   <widget class="QPushButton" name="importStepButton">
+                    <property name="text">
+                     <string>导入 STEP</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
                    <widget class="QPushButton" name="copyButton">
                     <property name="text">
                      <string>复制</string>
@@ -129,10 +136,20 @@
                  </layout>
                 </item>
                 <item>
-                 <widget class="QListWidget" name="modelList">
+                 <widget class="QTreeWidget" name="modelList">
                   <property name="minimumHeight">
                    <number>150</number>
                   </property>
+                  <column>
+                   <property name="text">
+                    <string>名称</string>
+                   </property>
+                  </column>
+                  <column>
+                   <property name="text">
+                    <string>材料</string>
+                   </property>
+                  </column>
                  </widget>
                 </item>
                 <item>
@@ -255,6 +272,46 @@
                  </widget>
                 </item>
                 <item>
+                 <spacer name="modelSpacer">
+                  <property name="orientation">
+                   <enum>Qt::Vertical</enum>
+                  </property>
+                  <property name="sizeHint" stdset="0">
+                   <size>
+                    <width>20</width>
+                    <height>30</height>
+                   </size>
+                  </property>
+                 </spacer>
+                </item>
+               </layout>
+              </widget>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+          <widget class="QWidget" name="sliceTab">
+           <attribute name="title">
+            <string>切片</string>
+           </attribute>
+           <layout class="QVBoxLayout" name="sliceTabLayout">
+            <property name="leftMargin"><number>0</number></property>
+            <property name="topMargin"><number>0</number></property>
+            <property name="rightMargin"><number>0</number></property>
+            <property name="bottomMargin"><number>0</number></property>
+            <property name="spacing"><number>6</number></property>
+            <item>
+             <widget class="QScrollArea" name="sliceScroll">
+              <property name="widgetResizable">
+               <bool>true</bool>
+              </property>
+              <property name="frameShape">
+               <enum>QFrame::NoFrame</enum>
+              </property>
+              <widget class="QWidget" name="sliceScrollContent">
+               <layout class="QVBoxLayout" name="sliceContentLayout">
+               <property name="spacing"><number>8</number></property>
+                <item>
                  <widget class="QGroupBox" name="printSettingsGroup">
                   <property name="title">
                    <string>打印设置</string>
@@ -340,82 +397,39 @@
                      <property name="value"><double>0.050000000000000</double></property>
                     </widget>
                    </item>
-                  </layout>
+                 </layout>
                  </widget>
                 </item>
                 <item>
-                 <spacer name="modelSpacer">
-                  <property name="orientation">
-                   <enum>Qt::Vertical</enum>
-                  </property>
-                  <property name="sizeHint" stdset="0">
-                   <size>
-                    <width>20</width>
-                    <height>30</height>
-                   </size>
-                  </property>
-                 </spacer>
-                </item>
-               </layout>
-              </widget>
-             </widget>
-            </item>
-           </layout>
-          </widget>
-          <widget class="QWidget" name="sliceTab">
-           <attribute name="title">
-            <string>切片</string>
-           </attribute>
-           <layout class="QVBoxLayout" name="sliceTabLayout">
-            <property name="leftMargin"><number>0</number></property>
-            <property name="topMargin"><number>0</number></property>
-            <property name="rightMargin"><number>0</number></property>
-            <property name="bottomMargin"><number>0</number></property>
-            <property name="spacing"><number>6</number></property>
-            <item>
-             <widget class="QScrollArea" name="sliceScroll">
-              <property name="widgetResizable">
-               <bool>true</bool>
-              </property>
-              <property name="frameShape">
-               <enum>QFrame::NoFrame</enum>
-              </property>
-              <widget class="QWidget" name="sliceScrollContent">
-               <layout class="QVBoxLayout" name="sliceContentLayout">
-                <property name="spacing"><number>8</number></property>
-                <item>
-                 <widget class="QGroupBox" name="exposureGroup">
+                 <widget class="QGroupBox" name="pathsGroup">
                   <property name="title">
-                   <string>曝光参数（每材料）</string>
+                   <string>输出</string>
                   </property>
-                  <layout class="QVBoxLayout" name="exposureLayout">
-                   <item>
-                    <layout class="QHBoxLayout" name="bottomLayersRow">
-                     <item>
-                      <widget class="QLabel" name="bottomLayersLabel">
-                       <property name="text">
-                        <string>底层层数</string>
-                       </property>
-                      </widget>
-                     </item>
-                     <item>
-                      <widget class="QSpinBox" name="bottomLayersSpin">
-                       <property name="maximum"><number>500</number></property>
-                       <property name="value"><number>3</number></property>
-                      </widget>
-                     </item>
-                    </layout>
+                  <layout class="QGridLayout" name="pathsLayout">
+                   <item row="0" column="0">
+                    <widget class="QLabel" name="outputPathLabel">
+                     <property name="text">
+                      <string>输出目录</string>
+                     </property>
+                    </widget>
                    </item>
-                   <item>
-                    <widget class="QTableWidget" name="materialTable">
-                     <property name="minimumHeight">
-                      <number>150</number>
+                   <item row="0" column="1">
+                    <widget class="QLineEdit" name="outputPathEdit"/>
+                   </item>
+                   <item row="0" column="2">
+                    <widget class="QPushButton" name="browseOutputButton">
+                     <property name="text">
+                      <string>...</string>
                      </property>
-                     <property name="editTriggers">
-                      <set>QAbstractItemView::AllEditTriggers</set>
+                    </widget>
+                   </item>
+                   <item row="1" column="0" colspan="3">
+                    <widget class="QPushButton" name="importConfigButton">
+                     <property name="text">
+                      <string>导入 config.yaml</string>
                      </property>
-                     <property name="selectionMode">
-                      <enum>QAbstractItemView::NoSelection</enum>
+                     <property name="toolTip">
+                      <string>从手动编辑的 config.yaml 读取打印、曝光、常规和高级参数</string>
                      </property>
                     </widget>
                    </item>
@@ -425,13 +439,7 @@
                 <item>
                  <widget class="QGroupBox" name="advancedGroup">
                   <property name="title">
-                   <string>高级选项</string>
-                  </property>
-                  <property name="checkable">
-                   <bool>true</bool>
-                  </property>
-                  <property name="checked">
-                   <bool>false</bool>
+                   <string>常规选项</string>
                   </property>
                   <layout class="QVBoxLayout" name="advancedLayout">
                    <item>
@@ -476,25 +484,60 @@
                  </widget>
                 </item>
                 <item>
-                 <widget class="QGroupBox" name="pathsGroup">
+                 <widget class="QGroupBox" name="advancedParamsGroup">
                   <property name="title">
-                   <string>输出</string>
+                   <string>高级选项</string>
                   </property>
-                  <layout class="QGridLayout" name="pathsLayout">
-                   <item row="0" column="0">
-                    <widget class="QLabel" name="outputPathLabel">
-                     <property name="text">
-                      <string>输出目录</string>
+                  <layout class="QVBoxLayout" name="advancedParamsLayout">
+                   <item>
+                    <widget class="QTableWidget" name="advancedParamTable">
+                     <property name="minimumHeight">
+                      <number>260</number>
+                     </property>
+                     <property name="editTriggers">
+                      <set>QAbstractItemView::AllEditTriggers</set>
+                     </property>
+                     <property name="selectionBehavior">
+                      <enum>QAbstractItemView::SelectRows</enum>
                      </property>
                     </widget>
                    </item>
-                   <item row="0" column="1">
-                    <widget class="QLineEdit" name="outputPathEdit"/>
+                 </layout>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QGroupBox" name="exposureGroup">
+                  <property name="title">
+                   <string>曝光参数（每材料）</string>
+                  </property>
+                  <layout class="QVBoxLayout" name="exposureLayout">
+                   <item>
+                    <layout class="QHBoxLayout" name="bottomLayersRow">
+                     <item>
+                      <widget class="QLabel" name="bottomLayersLabel">
+                       <property name="text">
+                        <string>底层层数</string>
+                       </property>
+                      </widget>
+                     </item>
+                     <item>
+                      <widget class="QSpinBox" name="bottomLayersSpin">
+                       <property name="maximum"><number>500</number></property>
+                       <property name="value"><number>3</number></property>
+                      </widget>
+                     </item>
+                    </layout>
                    </item>
-                   <item row="0" column="2">
-                    <widget class="QPushButton" name="browseOutputButton">
-                     <property name="text">
-                      <string>...</string>
+                   <item>
+                    <widget class="QTableWidget" name="materialTable">
+                     <property name="minimumHeight">
+                      <number>110</number>
+                     </property>
+                     <property name="editTriggers">
+                      <set>QAbstractItemView::AllEditTriggers</set>
+                     </property>
+                     <property name="selectionMode">
+                      <enum>QAbstractItemView::NoSelection</enum>
                      </property>
                     </widget>
                    </item>

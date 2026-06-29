@@ -46,9 +46,13 @@ set(PRESET_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/config/machine_material_presets.ya
 if(WIN32)
     set(BACKEND_TOOL ${CMAKE_CURRENT_SOURCE_DIR}/backend_dist/slice_merge_tool.exe)
     set(BACKEND_OUTPUT_NAME slice_merge_tool.exe)
+    set(STEP_TOOL ${CMAKE_CURRENT_SOURCE_DIR}/backend_dist/step_to_stl_parts.exe)
+    set(STEP_OUTPUT_NAME step_to_stl_parts.exe)
 else()
     set(BACKEND_TOOL ${CMAKE_CURRENT_SOURCE_DIR}/backend_dist/slice_merge_tool)
     set(BACKEND_OUTPUT_NAME slice_merge_tool)
+    set(STEP_TOOL ${CMAKE_CURRENT_SOURCE_DIR}/backend_dist/step_to_stl_parts)
+    set(STEP_OUTPUT_NAME step_to_stl_parts)
 endif()
 
 if(APPLE)
@@ -68,6 +72,9 @@ if(APPLE)
             ${CMAKE_CURRENT_SOURCE_DIR}/slice_1080p.py
             $<TARGET_BUNDLE_CONTENT_DIR:MultiMaterialSlicer>/Resources/slice_1080p.py
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/step_to_stl_parts.py
+            $<TARGET_BUNDLE_CONTENT_DIR:MultiMaterialSlicer>/Resources/step_to_stl_parts.py
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${PRESET_CONFIG}
             $<TARGET_BUNDLE_CONTENT_DIR:MultiMaterialSlicer>/Resources/machine_material_presets.yaml
     )
@@ -78,11 +85,21 @@ if(APPLE)
                 $<TARGET_BUNDLE_CONTENT_DIR:MultiMaterialSlicer>/MacOS/slice_merge_tool
         )
     endif()
+    if(EXISTS ${STEP_TOOL})
+        add_custom_command(TARGET MultiMaterialSlicer POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${STEP_TOOL}
+                $<TARGET_BUNDLE_CONTENT_DIR:MultiMaterialSlicer>/MacOS/step_to_stl_parts
+        )
+    endif()
 else()
     add_custom_command(TARGET MultiMaterialSlicer POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_CURRENT_SOURCE_DIR}/slice_1080p.py
             $<TARGET_FILE_DIR:MultiMaterialSlicer>/slice_1080p.py
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/step_to_stl_parts.py
+            $<TARGET_FILE_DIR:MultiMaterialSlicer>/step_to_stl_parts.py
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${PRESET_CONFIG}
             $<TARGET_FILE_DIR:MultiMaterialSlicer>/machine_material_presets.yaml
@@ -92,6 +109,13 @@ else()
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${BACKEND_TOOL}
                 $<TARGET_FILE_DIR:MultiMaterialSlicer>/${BACKEND_OUTPUT_NAME}
+        )
+    endif()
+    if(EXISTS ${STEP_TOOL})
+        add_custom_command(TARGET MultiMaterialSlicer POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${STEP_TOOL}
+                $<TARGET_FILE_DIR:MultiMaterialSlicer>/${STEP_OUTPUT_NAME}
         )
     endif()
 endif()

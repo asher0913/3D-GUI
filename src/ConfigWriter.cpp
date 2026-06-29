@@ -18,56 +18,39 @@ QString yamlPath(const QString& path)
     return QStringLiteral("\"%1\"").arg(normalized);
 }
 
-void writeMachineDefaults(QTextStream& out)
+QString yamlScalar(QString value, bool forceQuote)
 {
-    out << "back_distance: 5\n";
-    out << "slider_height: 5\n";
-    out << "max_height: 165\n";
-    out << "min_height: -50\n";
-    out << "z_acc_h: 100.0\n";
-    out << "z_dec_h: -100.0\n";
-    out << "z_speed_h: 450.0\n";
-    out << "z_acc_l: 50.0\n";
-    out << "z_dec_l: -50.0\n";
-    out << "z_speed_l: 100.0\n";
-    out << "r_acc: 60.0\n";
-    out << "r_dec: -60.0\n";
-    out << "r_speed: 120.0\n";
-    out << "clean_tank: 3\n";
-    out << "clean_tank_height: 20\n";
-    out << "clean_height: 25\n";
-    out << "clean_height_coefficient: 0.95\n";
-    out << "clean_times: 3\n";
-    out << "clean_time: 5.0\n";
-    out << "clean_distance: 10\n";
-    out << "dry_tank: 4\n";
-    out << "dry_height: 60\n";
-    out << "dry_time_bottom: 210\n";
-    out << "dry_time_standard: 200\n";
-    out << "pre_z_height: 10\n";
-    out << "drop_time_bottom: 20\n";
-    out << "drop_layers_bottom: 20\n";
-    out << "drop_time_standard: 10\n";
-    out << "ASS: false\n";
-    out << "ASS_times: 100\n";
-    out << "ASS_volume: 470\n";
-    out << "AMS: false\n";
-    out << "AMS0_layers: \"-1 -1\"\n";
-    out << "AMS1_layers: \"-1 -1\"\n";
-    out << "AMS2_layers: \"-1 -1\"\n";
-    out << "AMS_tank_offset: 2.5\n";
-    out << "AMS_volume: 30\n";
-    out << "plate_rotate_height: 140\n";
-    out << "glass_rotate_height: -50\n";
-    out << "lapse: false\n";
-    out << "lapse_height: 160\n";
-    out << "lapse_tank: 0\n";
-    out << "alpha: false\n";
-    out << "beta: false\n";
-    out << "block_size: 16\n";
-    out << "wait_after_exposure: 0.5\n";
-    out << "wait_before_exposure: 0.5\n";
-    out << "finished_clean: false\n";
+    value = value.trimmed();
+    if (forceQuote) {
+        value.replace(QStringLiteral("\\"), QStringLiteral("\\\\"));
+        value.replace(QStringLiteral("\""), QStringLiteral("\\\""));
+        return QStringLiteral("\"%1\"").arg(value);
+    }
+    if (value.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0) {
+        return QStringLiteral("true");
+    }
+    if (value.compare(QStringLiteral("false"), Qt::CaseInsensitive) == 0) {
+        return QStringLiteral("false");
+    }
+    bool numberOk = false;
+    value.toDouble(&numberOk);
+    if (numberOk) {
+        return value;
+    }
+    if (value.isEmpty()) {
+        return QStringLiteral("\"\"");
+    }
+    value.replace(QStringLiteral("\\"), QStringLiteral("\\\\"));
+    value.replace(QStringLiteral("\""), QStringLiteral("\\\""));
+    return QStringLiteral("\"%1\"").arg(value);
+}
+
+void writeAdvancedConfigParams(QTextStream& out, const QMap<QString, QString>& values)
+{
+    for (const AdvancedConfigParam& param : defaultAdvancedConfigParams()) {
+        const QString value = values.value(param.key, param.defaultValue);
+        out << param.key << ": " << yamlScalar(value, param.quoteValue) << "\n";
+    }
 }
 
 } // namespace
@@ -118,15 +101,19 @@ bool ConfigWriter::writeYaml(const SliceSettings& settings,
         // Also record the light strength for debugging / round-trip.
         out << "bottom_exposure_strength_" << i << ": " << exposure.bottomExposureStrength << "\n";
         out << "standard_exposure_strength_" << i << ": " << exposure.standardExposureStrength << "\n";
+        if (!exposure.presetId.isEmpty()) {
+            out << "material_preset_" << i << ": " << yamlScalar(exposure.presetId, true) << "\n";
+        }
     }
 
-    // Advanced options come from the UI rather than fixed defaults.
+    // Regular options come from the UI.
     out << "groove: " << yamlBool(settings.groove) << "\n";
     out << "slide_0: " << yamlBool(settings.slide0) << "\n";
     out << "slide_1: " << yamlBool(settings.slide1) << "\n";
     out << "slide_2: " << yamlBool(settings.slide2) << "\n";
 
-    writeMachineDefaults(out);
+    // Machine/GCode advanced parameters come from the editable table.
+    writeAdvancedConfigParams(out, settings.advancedParams);
 
     for (int src = 0; src < settings.materialCount; ++src) {
         for (int dst = 0; dst < settings.materialCount; ++dst) {

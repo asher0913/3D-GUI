@@ -1,10 +1,10 @@
 # MultiMaterialSlicer Technical Report
 
-Updated: 2026-06-25
+Updated: 2026-06-29
 
 ## 1. Summary
 
-MultiMaterialSlicer is a Qt/C++ desktop application for a multi-material resin printer slicing workflow. The current version integrates the previous external process of exporting per-material folders and then running a Python merge script. The application now imports STL models, displays them in a lightweight 3D view, lets the user edit transforms and material assignments, exports per-material PNG slices, writes `config.yaml`, and calls a packaged backend command-line tool to generate merged images and `run.gcode`.
+MultiMaterialSlicer is a Qt/C++ desktop application for a multi-material resin printer slicing workflow. The current version integrates the previous external process of exporting per-material folders and then running a Python merge script. The application now imports STL models and STEP assemblies, displays them in a lightweight 3D view, lets the user edit transforms and material assignments, exports per-material PNG slices, writes `config.yaml`, and calls a packaged backend command-line tool to generate merged images and `run.gcode`.
 
 The application uses:
 
@@ -15,26 +15,28 @@ The application uses:
 - Qt Designer `.ui`
 - `QOpenGLWidget` for the 3D viewport
 - Python source for the merge backend, packaged with PyInstaller for release
+- CadQuery/OCP-based STEP conversion helper, packaged with PyInstaller for release
 
 ## 2. Main Workflow
 
 The implemented workflow is:
 
 1. Load the machine/material preset YAML library.
-2. Import one or more STL files.
+2. Import one or more STL files, or import a STEP/STP assembly.
 3. Display imported models in the OpenGL viewport.
-4. Select a model and edit translation, rotation, uniform scale, and material.
-5. Optionally duplicate selected models.
-6. Configure material count and per-material exposure/strength settings.
-7. Export per-material PNG folders.
-8. Write `config.yaml`.
-9. Run backend command-line tool:
+4. Select a normal model and edit translation, rotation, uniform scale, and material.
+5. For STEP assemblies, select the parent node to move/rotate/scale the whole assembly, and select child solids to assign materials independently.
+6. Optionally duplicate selected models.
+7. Configure material count and per-material exposure/strength settings.
+8. Export per-material PNG folders.
+9. Write `config.yaml`.
+10. Run backend command-line tool:
 
 ```bash
 slice_merge_tool --config <config.yaml> --output <merged_dir>
 ```
 
-10. Produce merged PNG output and `run.gcode`.
+11. Produce merged PNG output and `run.gcode`.
 
 ## 3. Architecture
 
@@ -42,7 +44,8 @@ slice_merge_tool --config <config.yaml> --output <merged_dir>
 |---|---|---|
 | UI | `ui/MainWindow.ui`, `src/MainWindow.*` | Qt Designer-editable UI with resizable main window |
 | 3D View | `src/OpenGLView.*` | Lightweight OpenGL viewport based on `QOpenGLWidget` |
-| STL Loading | `src/StlLoader.*` | Binary/ASCII STL import path |
+| STL Loading | `src/StlMesh.*` | Binary/ASCII STL import path |
+| STEP Loading | `tools/step_to_stl_parts.py`, `backend_dist/step_to_stl_parts` | Converts STEP solids to per-part STL plus `manifest.json` |
 | Slicing | `src/SliceExporter.*` | Per-material PNG export |
 | Config | `src/ConfigWriter.*` | Writes backend-compatible `config.yaml` |
 | Presets | `src/PresetLibrary.h`, `src/PresetLoader.*` | Loads machine/material YAML library |
@@ -67,9 +70,16 @@ Implemented meeting requirements:
 - The label “电流” was replaced by “光强” in user-facing fields.
 - Selected model can be duplicated.
 - The main window is resizable.
-- Groove is displayed as “挡板”.
-- `slide_0`、`slide_1`、`slide_2` are displayed as “刮板1”、“刮板2”、“刮板3”.
+- Groove is displayed as “挡板” inside the slicing page's regular options.
+- `slide_0`、`slide_1`、`slide_2` are displayed as “刮板1”、“刮板2”、“刮板3” inside the regular options.
+- The print settings group now lives on the slicing page rather than the model page.
+- The advanced options group now exposes backend machine/GCode parameters such as `max_height`, `z_acc_h`, `clean_tank`, `dry_tank`, `drop_time_bottom`, `ASS`, and `ASS_times`.
+- A manually edited flat `config.yaml` can be imported to populate print settings, exposure settings, regular options, and advanced parameters.
 - The user-facing workflow calls a backend command-line tool rather than exposing a Python script as the formal runtime.
+- STEP/STP assembly import is available through “导入 STEP”.
+- STEP assemblies appear as tree parents with child solid leaves.
+- STEP child solids can have independent materials.
+- STEP parent transforms move all children together while preserving their imported relative geometry.
 
 ## 5. 3D Framework
 
@@ -151,6 +161,44 @@ slide_2: false
 ```
 
 It also writes machine dimensions, resolution, layer thickness, exposure values, strength/current values, and material transition parameters.
+It now writes editable advanced machine/GCode parameters from the UI table instead of using only fixed defaults.
+
+## 8.5. STEP Assembly Import
+
+STEP import is intentionally implemented through a replaceable command-line helper rather than embedding a full CAD kernel directly into the Qt GUI. The default helper is:
+
+```text
+tools/step_to_stl_parts.py
+```
+
+Release packaging turns it into:
+
+```text
+macOS:   backend_dist/step_to_stl_parts
+Windows: backend_dist/step_to_stl_parts.exe
+```
+
+The helper runs:
+
+```bash
+step_to_stl_parts --input <model.step> --output <parts_dir>
+```
+
+It writes one STL per STEP solid plus:
+
+```text
+manifest.json
+```
+
+The GUI reads the manifest and creates a tree:
+
+```text
+step示例.step
+  实体1    material 1
+  实体2    material 2
+```
+
+The current default converter splits by solid using OCP/OpenCascade. It has been validated with `demo_step/step示例.step`, which produces two child solids. The manifest-based boundary leaves room to replace the converter later with a deeper XCAF/OCC assembly parser if production files require full multi-level CAD assembly hierarchy, instance reuse, or richer naming.
 
 ## 9. Backend Runtime
 
@@ -203,7 +251,8 @@ dist/MultiMaterialSlicer-mac-x86_64.zip
 The packaged app contains the backend tool in:
 
 ```text
-MultiMaterialSlicer.app/Contents/Resources/slice_merge_tool
+MultiMaterialSlicer.app/Contents/MacOS/slice_merge_tool
+MultiMaterialSlicer.app/Contents/MacOS/step_to_stl_parts
 ```
 
 ## 11. Windows Packaging
@@ -218,12 +267,16 @@ scripts/package_windows.ps1
 The Windows packaging flow is:
 
 1. Build `slice_merge_tool.exe` with PyInstaller.
-2. Build the Qt application with CMake and Visual Studio.
-3. Copy config and backend files.
-4. Run `windeployqt.exe`.
-5. Create `dist\MultiMaterialSlicer-win64.zip`.
+2. Build `step_to_stl_parts.exe` with PyInstaller and CadQuery/OCP.
+3. Build the Qt application with CMake and Visual Studio.
+4. Copy config, backend, and STEP converter files.
+5. Run `windeployqt.exe`.
+6. Copy `demo_stl` and `demo_step` into `examples/`.
+7. Smoke-check required runtime files and helper startup.
+8. Optionally run packaged app self-test with `-RunSelfTest`.
+9. Create `dist\MultiMaterialSlicer-win64.zip`.
 
-The scripts are present and aligned with the macOS flow. A final Windows binary should be produced and validated on a real Windows machine.
+The scripts are present and aligned with the macOS flow. Python 3.10-3.12 is recommended because CadQuery/OCP wheels may not exist for newer Python versions. A final Windows binary should still be produced and validated on a real Windows machine.
 
 ## 12. Self-Test
 
@@ -233,7 +286,14 @@ An internal self-test mode exists:
 open -W -n MultiMaterialSlicer.app --args --selftest <a.stl> <b.stl>
 ```
 
+It also supports STEP assembly input:
+
+```bash
+open -W -n MultiMaterialSlicer.app --args --selftest demo_step/step示例.step
+```
+
 The self-test imports models, configures materials, exports PNGs, writes config, calls the backend, and validates output. It is useful for quickly checking a packaged app before a meeting.
+The self-test now uses Qt's system temporary directory (`QDir::tempPath()`), so it is suitable for both macOS and Windows.
 
 ## 13. GUI Validation
 
@@ -242,18 +302,23 @@ The final packaged macOS app was actually opened and operated with Computer Use.
 - App launch.
 - Default material count inspection.
 - STL import through the application startup import path.
+- STEP import through the application startup import path.
+- STEP model tree display: `step示例.step -> 实体1 / 实体2`.
+- STEP child material edit from material 1 to material 2.
+- STEP parent transform editing with child solids moving together.
 - Model selection.
 - Material assignment.
 - Translation, rotation, and scale editing.
 - Model duplication.
 - Switching to the slicing tab.
 - Checking “光强” labels.
-- Checking “挡板” and “刮板1/2/3” labels.
+- Checking “挡板” and “刮板1/2/3” labels in regular options.
+- Checking the advanced machine/GCode parameter table and `config.yaml` import entry.
 - Running the export and backend workflow.
 - Confirming the success dialog.
 - Checking generated files.
 
-The only automation limitation is that Computer Use does not reliably operate the macOS native file picker. The import button itself opens the correct picker; for automation, startup STL arguments were used to exercise the same import code path.
+The only automation limitation is that Computer Use does not reliably operate the macOS native file picker. The import buttons themselves open the correct pickers; for automation, startup STL/STEP arguments were used to exercise the same import code paths.
 
 ## 14. Verified Output
 
@@ -285,17 +350,25 @@ The generated GCode contained:
 - `slide 0`
 - `proj`
 
+Additional STEP validation:
+
+- `tools/step_to_stl_parts.py --input demo_step/step示例.step --output /tmp/mms_step_test` produced two STL files and `manifest.json`.
+- `backend_dist/step_to_stl_parts --input demo_step/step示例.step --output /tmp/mms_step_exe_test` produced the same two-part output.
+- `open -n build-x86_64/MultiMaterialSlicer.app --args --selftest demo_step/step示例.step` completed and generated `config.yaml`, per-material PNGs, merged PNGs, and `run.gcode`.
+
 ## 15. Current Risks and Follow-Ups
 
 Remaining engineering follow-ups:
 
 - Validate the Windows package on an actual Windows machine.
 - Decide whether macOS should ship x86_64 only, arm64 only, or universal.
+- If distributing STEP import to Intel Mac users, rebuild `step_to_stl_parts` under an x86_64 Python environment. The helper built on this Apple Silicon machine is arm64 and has been validated on Apple Silicon.
 - Add formal installer/signing/notarization for production distribution.
 - Improve high-poly STL performance if real customer files are much larger than demo files.
+- Extend the STEP converter to preserve full XCAF assembly hierarchy if production STEP files need deeper nested CAD trees beyond per-solid splitting.
 - Strengthen the slicer geometry algorithm if production accuracy requirements exceed the current lightweight implementation.
 - Add repeatable GUI automation that does not depend on native OS file dialogs.
 
 ## 16. Conclusion
 
-The current implementation satisfies the requested integrated demo workflow: a Qt/C++ APP with editable `.ui`, OpenGL STL preview, per-model transform/material control, adjustable material count, model duplication, YAML machine/material presets, per-material PNG export, backend command-line invocation, generated `config.yaml`, generated `run.gcode`, macOS packaging, and actual GUI validation.
+The current implementation satisfies the requested integrated demo workflow: a Qt/C++ APP with editable `.ui`, OpenGL STL/STEP preview, per-model transform/material control, STEP parent/child tree behavior, adjustable material count, model duplication, YAML machine/material presets, config import, editable advanced machine/GCode parameters, per-material PNG export, backend command-line invocation, generated `config.yaml`, generated `run.gcode`, macOS packaging, and actual GUI validation.

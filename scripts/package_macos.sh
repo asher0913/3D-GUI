@@ -19,10 +19,15 @@ APP_PATH="$BUILD_DIR/MultiMaterialSlicer.app"
 DIST_DIR="$ROOT_DIR/dist"
 BUNDLE_QT="${BUNDLE_QT:-1}"
 BUILD_BACKEND="${BUILD_BACKEND:-1}"
+BUILD_STEP_TOOL="${BUILD_STEP_TOOL:-1}"
 BACKEND_TOOL="$ROOT_DIR/backend_dist/slice_merge_tool"
+STEP_TOOL="$ROOT_DIR/backend_dist/step_to_stl_parts"
 
 if [ "$BUILD_BACKEND" = "1" ]; then
     bash "$ROOT_DIR/scripts/package_backend_macos.sh"
+fi
+if [ "$BUILD_STEP_TOOL" = "1" ] && [ ! -x "$STEP_TOOL" ]; then
+    bash "$ROOT_DIR/scripts/package_step_macos.sh"
 fi
 
 cmake -S "$ROOT_DIR" -B "$BUILD_DIR" \
@@ -42,6 +47,14 @@ if [ -x "$BACKEND_TOOL" ]; then
 else
     echo "WARNING: backend tool not found at $BACKEND_TOOL"
     echo "         The app will fall back to Resources/slice_1080p.py in development mode."
+fi
+if [ -x "$STEP_TOOL" ]; then
+    mkdir -p "$APP_PATH/Contents/MacOS"
+    cp "$STEP_TOOL" "$APP_PATH/Contents/MacOS/step_to_stl_parts"
+    chmod +x "$APP_PATH/Contents/MacOS/step_to_stl_parts"
+else
+    echo "WARNING: STEP converter not found at $STEP_TOOL"
+    echo "         STEP import will require Python + OCP/CadQuery at runtime."
 fi
 
 if [ "$BUNDLE_QT" != "1" ]; then
@@ -71,6 +84,11 @@ if [ -x "$BACKEND_TOOL" ]; then
     rm -f "$DAPP/Contents/Resources/slice_merge_tool"
     cp "$BACKEND_TOOL" "$DAPP/Contents/MacOS/slice_merge_tool"
     chmod +x "$DAPP/Contents/MacOS/slice_merge_tool"
+fi
+if [ -x "$STEP_TOOL" ]; then
+    rm -f "$DAPP/Contents/Resources/step_to_stl_parts"
+    cp "$STEP_TOOL" "$DAPP/Contents/MacOS/step_to_stl_parts"
+    chmod +x "$DAPP/Contents/MacOS/step_to_stl_parts"
 fi
 
 # Sign inside-out so the bundled frameworks pass library validation.

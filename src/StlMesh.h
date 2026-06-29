@@ -9,6 +9,7 @@ public:
     bool load(const QString& filePath, QString* errorMessage = nullptr);
     bool isEmpty() const { return m_vertices.isEmpty(); }
     void normalizeToBuildPlateOrigin();
+    void translate(const QVector3D& offset);
 
     const QVector<QVector3D>& vertices() const { return m_vertices; }
     const QVector<QVector3D>& normals() const { return m_normals; }

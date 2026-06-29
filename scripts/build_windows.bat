@@ -7,7 +7,7 @@ REM  Prerequisites (install once):
 REM    - Qt 5.12.12 MSVC 64-bit   (e.g. C:\Qt\5.12.12\msvc2017_64)
 REM    - Visual Studio 2019/2022 with "Desktop development with C++"
 REM    - CMake                    (https://cmake.org, add to PATH)
-REM    - Python 3.10+             (https://python.org, "Add to PATH")
+REM    - Python 3.10/3.11/3.12    (CadQuery/OCP STEP import needs these wheels)
 REM =====================================================================
 setlocal
 echo ============================================================
