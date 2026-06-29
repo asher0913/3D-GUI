@@ -6,6 +6,7 @@
 #include <QColor>
 #include <QMap>
 #include <QMatrix4x4>
+#include <QSharedPointer>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -29,9 +30,10 @@ struct Transform {
 };
 
 struct ModelInstance {
+    QString id;
     QString filePath;
     QString name;
-    StlMesh mesh;
+    QSharedPointer<StlMesh> mesh;
     Transform transform;
     int materialIndex = 0;
     QColor color = QColor(44, 160, 220);

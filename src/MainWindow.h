@@ -14,6 +14,8 @@ class QComboBox;
 class QTreeWidgetItem;
 QT_END_NAMESPACE
 
+class SliceWorker;
+
 namespace Ui {
 class MainWindow;
 }
@@ -37,10 +39,13 @@ private slots:
     void browseOutputDir();
     void importConfigYaml();
     void runWorkflow();
+    void cancelWorkflow();
+    void workerProgress(int current, int total, const QString& stage);
     void workerFinished(bool success, const QString& summary, const QString& outputDir);
 
 private:
     int selectedModelIndex() const;
+    int modelIndexById(const QString& id) const;
     QString selectedAssemblyId() const;
     bool selectedItemIsAssembly() const;
     SliceSettings collectSettings() const;
@@ -92,5 +97,7 @@ private:
     bool m_rebuildingModelTree = false;
     int m_nextAssemblyId = 1;
     QThread* m_workerThread = nullptr;
+    SliceWorker* m_worker = nullptr;
     bool m_selfTest = false;
+    int m_nextModelId = 1;
 };

@@ -6,10 +6,14 @@
 #include <QStringList>
 #include <QVector>
 
+#include <functional>
+
 struct SliceExportStats {
     int layerCount = 0;
     QVector<int> materialImageCounts;
 };
+
+using SliceProgressCallback = std::function<bool(int currentLayer, int totalLayers)>;
 
 class SliceExporter {
 public:
@@ -18,5 +22,6 @@ public:
                              const QString& outputRoot,
                              QStringList* materialDirs,
                              SliceExportStats* stats,
-                             QString* errorMessage);
+                             QString* errorMessage,
+                             const SliceProgressCallback& progressCallback = SliceProgressCallback());
 };

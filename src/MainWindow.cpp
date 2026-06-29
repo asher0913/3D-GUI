@@ -10,6 +10,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -19,6 +20,7 @@
 #include <QJsonObject>
 #include <QMessageBox>
 #include <QProcess>
+#include <QSharedPointer>
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QStyle>
@@ -198,13 +200,21 @@ void normalizeMeshesTogether(QVector<ModelInstance>* models)
                         -std::numeric_limits<float>::max(),
                         -std::numeric_limits<float>::max());
 
+    bool hasMesh = false;
     for (const ModelInstance& model : *models) {
-        minBounds.setX(std::min(minBounds.x(), model.mesh.minBounds().x()));
-        minBounds.setY(std::min(minBounds.y(), model.mesh.minBounds().y()));
-        minBounds.setZ(std::min(minBounds.z(), model.mesh.minBounds().z()));
-        maxBounds.setX(std::max(maxBounds.x(), model.mesh.maxBounds().x()));
-        maxBounds.setY(std::max(maxBounds.y(), model.mesh.maxBounds().y()));
-        maxBounds.setZ(std::max(maxBounds.z(), model.mesh.maxBounds().z()));
+        if (!model.mesh) {
+            continue;
+        }
+        hasMesh = true;
+        minBounds.setX(std::min(minBounds.x(), model.mesh->minBounds().x()));
+        minBounds.setY(std::min(minBounds.y(), model.mesh->minBounds().y()));
+        minBounds.setZ(std::min(minBounds.z(), model.mesh->minBounds().z()));
+        maxBounds.setX(std::max(maxBounds.x(), model.mesh->maxBounds().x()));
+        maxBounds.setY(std::max(maxBounds.y(), model.mesh->maxBounds().y()));
+        maxBounds.setZ(std::max(maxBounds.z(), model.mesh->maxBounds().z()));
+    }
+    if (!hasMesh) {
+        return;
     }
 
     const QVector3D offset(
@@ -212,7 +222,9 @@ void normalizeMeshesTogether(QVector<ModelInstance>* models)
         -(minBounds.y() + maxBounds.y()) * 0.5f,
         -minBounds.z());
     for (ModelInstance& model : *models) {
-        model.mesh.translate(offset);
+        if (model.mesh) {
+            model.mesh->translate(offset);
+        }
     }
 }
 
@@ -250,6 +262,8 @@ MainWindow::MainWindow(QWidget* parent)
     ui->browseOutputButton->setIcon(style()->standardIcon(QStyle::SP_DirOpenIcon));
     ui->importConfigButton->setIcon(style()->standardIcon(QStyle::SP_DialogOpenButton));
     ui->runWorkflowButton->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
+    ui->cancelWorkflowButton->setIcon(style()->standardIcon(QStyle::SP_BrowserStop));
+    ui->workflowProgressBar->setValue(0);
 
     ui->modelList->setColumnCount(2);
     ui->modelList->setHeaderLabels(QStringList() << QStringLiteral("名称") << QStringLiteral("材料"));
@@ -274,6 +288,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(ui->browseOutputButton, &QPushButton::clicked, this, &MainWindow::browseOutputDir);
     connect(ui->importConfigButton, &QPushButton::clicked, this, &MainWindow::importConfigYaml);
     connect(ui->runWorkflowButton, &QPushButton::clicked, this, &MainWindow::runWorkflow);
+    connect(ui->cancelWorkflowButton, &QPushButton::clicked, this, &MainWindow::cancelWorkflow);
 
     connect(ui->materialCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::selectedModelEdited);
     connect(ui->posXSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &MainWindow::selectedModelEdited);
@@ -342,8 +357,11 @@ MainWindow::MainWindow(QWidget* parent)
 MainWindow::~MainWindow()
 {
     if (m_workerThread) {
+        if (m_worker) {
+            m_worker->requestCancel();
+        }
         m_workerThread->quit();
-        m_workerThread->wait();
+        m_workerThread->wait(10000);
     }
     delete ui;
 }
@@ -496,6 +514,7 @@ void MainWindow::setConfigDependentEnabled(bool enabled)
     ui->copyButton->setEnabled(false);  // also needs a selection
     ui->removeButton->setEnabled(false);
     ui->runWorkflowButton->setEnabled(enabled);
+    ui->cancelWorkflowButton->setEnabled(false);
     ui->machineCombo->setEnabled(enabled);
     ui->materialCountSpin->setEnabled(enabled);
     ui->materialTable->setEnabled(enabled);
@@ -956,6 +975,19 @@ int MainWindow::selectedModelIndex() const
     return index;
 }
 
+int MainWindow::modelIndexById(const QString& id) const
+{
+    if (id.isEmpty()) {
+        return -1;
+    }
+    for (int i = 0; i < m_models.size(); ++i) {
+        if (m_models[i].id == id) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 QString MainWindow::selectedAssemblyId() const
 {
     QTreeWidgetItem* item = ui->modelList->currentItem();
@@ -1008,14 +1040,15 @@ int MainWindow::importModelFiles(const QStringList& paths)
     int imported = 0;
     for (const QString& path : paths) {
         QString error;
-        StlMesh mesh;
-        if (!mesh.load(path, &error)) {
+        QSharedPointer<StlMesh> mesh = QSharedPointer<StlMesh>::create();
+        if (!mesh->load(path, &error)) {
             appendLog(QStringLiteral("Failed to load %1: %2").arg(path, error));
             continue;
         }
-        mesh.normalizeToBuildPlateOrigin();
+        mesh->normalizeToBuildPlateOrigin();
 
         ModelInstance model;
+        model.id = QStringLiteral("model_%1").arg(m_nextModelId++);
         model.filePath = path;
         model.name = QFileInfo(path).completeBaseName();
         model.mesh = mesh;
@@ -1072,7 +1105,18 @@ int MainWindow::importStepAssemblyFile(const QString& path)
         appendLog(QStringLiteral("无法启动 STEP 转换工具: %1").arg(program));
         return 0;
     }
-    process.waitForFinished(-1);
+    constexpr qint64 stepTimeoutMs = 10 * 60 * 1000;
+    QElapsedTimer timer;
+    timer.start();
+    while (!process.waitForFinished(250)) {
+        if (timer.elapsed() > stepTimeoutMs) {
+            process.kill();
+            process.waitForFinished(5000);
+            appendLog(QStringLiteral("STEP 转换超时，已终止: %1").arg(path));
+            return 0;
+        }
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    }
 
     const QString converterOutput = QString::fromUtf8(process.readAll()).trimmed();
     if (!converterOutput.isEmpty()) {
@@ -1121,13 +1165,14 @@ int MainWindow::importStepAssemblyFile(const QString& path)
         }
 
         QString error;
-        StlMesh mesh;
-        if (!mesh.load(stlPath, &error)) {
+        QSharedPointer<StlMesh> mesh = QSharedPointer<StlMesh>::create();
+        if (!mesh->load(stlPath, &error)) {
             appendLog(QStringLiteral("无法读取 STEP 子实体 STL %1: %2").arg(stlPath, error));
             continue;
         }
 
         ModelInstance model;
+        model.id = QStringLiteral("model_%1").arg(m_nextModelId++);
         model.filePath = stlPath;
         model.name = part.value(QStringLiteral("name")).toString(
             QStringLiteral("SOLID-%1").arg(importedModels.size() + 1));
@@ -1184,6 +1229,7 @@ void MainWindow::duplicateSelectedModel()
                 continue;
             }
             ModelInstance copy = model;
+            copy.id = QStringLiteral("model_%1").arg(m_nextModelId++);
             copy.assemblyId = newAssemblyId;
             copy.assemblyName = newName;
             m_models.append(copy);
@@ -1202,7 +1248,8 @@ void MainWindow::duplicateSelectedModel()
     if (index < 0) {
         return;
     }
-    ModelInstance copy = m_models[index];  // deep copy (mesh/transform/material/color)
+    ModelInstance copy = m_models[index];
+    copy.id = QStringLiteral("model_%1").arg(m_nextModelId++);
 
     const QString base = m_models[index].name;
     auto nameExists = [this](const QString& name) {
@@ -1449,8 +1496,10 @@ void MainWindow::refreshModelList()
         spin->setRange(1, std::max(1, ui->materialCountSpin->value()));
         spin->setValue(std::min(model.materialIndex + 1, spin->maximum()));
         spin->setAlignment(Qt::AlignCenter);
+        const QString modelId = model.id;
         connect(spin, QOverload<int>::of(&QSpinBox::valueChanged), this,
-                [this, modelIndex](int value) {
+                [this, modelId](int value) {
+                    const int modelIndex = modelIndexById(modelId);
                     if (m_rebuildingModelTree || modelIndex < 0 || modelIndex >= m_models.size()) {
                         return;
                     }
@@ -1656,10 +1705,16 @@ void MainWindow::setRunningState(bool running)
 {
     const bool hasSelection = selectedModelIndex() >= 0 || selectedItemIsAssembly();
     ui->runWorkflowButton->setEnabled(!running);
+    ui->cancelWorkflowButton->setEnabled(running);
     ui->importButton->setEnabled(!running);
     ui->importStepButton->setEnabled(!running);
     ui->copyButton->setEnabled(!running && hasSelection);
     ui->removeButton->setEnabled(!running && hasSelection);
+    if (!running) {
+        ui->workflowProgressBar->setRange(0, 100);
+        ui->workflowProgressBar->setValue(0);
+        ui->workflowProgressBar->setFormat(QStringLiteral("%p%"));
+    }
     if (running) {
         QApplication::setOverrideCursor(Qt::WaitCursor);
     } else {
@@ -1698,6 +1753,8 @@ void MainWindow::runWorkflow()
     }
 
     setRunningState(true);
+    ui->workflowProgressBar->setRange(0, 100);
+    ui->workflowProgressBar->setValue(0);
     statusBar()->showMessage(QStringLiteral("Running..."));
 
     auto* thread = new QThread(this);
@@ -1706,19 +1763,46 @@ void MainWindow::runWorkflow()
 
     connect(thread, &QThread::started, worker, &SliceWorker::process);
     connect(worker, &SliceWorker::logMessage, this, &MainWindow::appendLog);
+    connect(worker, &SliceWorker::progressChanged, this, &MainWindow::workerProgress);
     connect(worker, &SliceWorker::finished, this, &MainWindow::workerFinished);
     connect(worker, &SliceWorker::finished, thread, &QThread::quit);
     connect(worker, &SliceWorker::finished, worker, &SliceWorker::deleteLater);
     connect(thread, &QThread::finished, thread, &QThread::deleteLater);
 
     m_workerThread = thread;
+    m_worker = worker;
     thread->start();
+}
+
+void MainWindow::cancelWorkflow()
+{
+    if (!m_worker) {
+        return;
+    }
+    m_worker->requestCancel();
+    ui->cancelWorkflowButton->setEnabled(false);
+    statusBar()->showMessage(QStringLiteral("Canceling..."));
+    appendLog(QStringLiteral("正在取消当前工作流..."));
+}
+
+void MainWindow::workerProgress(int current, int total, const QString& stage)
+{
+    if (total <= 0) {
+        ui->workflowProgressBar->setRange(0, 0);
+        ui->workflowProgressBar->setFormat(stage);
+    } else {
+        ui->workflowProgressBar->setRange(0, total);
+        ui->workflowProgressBar->setValue(std::max(0, std::min(current, total)));
+        ui->workflowProgressBar->setFormat(QStringLiteral("%p% - %1").arg(stage));
+    }
+    statusBar()->showMessage(stage);
 }
 
 void MainWindow::workerFinished(bool success, const QString& summary, const QString& outputDir)
 {
     QThread* finishedThread = m_workerThread;
     m_workerThread = nullptr;
+    m_worker = nullptr;
     setRunningState(false);
 
     if (m_selfTest) {
@@ -1735,11 +1819,19 @@ void MainWindow::workerFinished(bool success, const QString& summary, const QStr
         return;
     }
 
+    const bool canceled = summary.contains(QStringLiteral("取消"))
+        || summary.contains(QStringLiteral("canceled"), Qt::CaseInsensitive);
     if (success) {
+        ui->workflowProgressBar->setRange(0, 100);
+        ui->workflowProgressBar->setValue(100);
+        ui->workflowProgressBar->setFormat(QStringLiteral("100%"));
         appendLog(QStringLiteral("Done. Output: %1").arg(outputDir));
         statusBar()->showMessage(QStringLiteral("Done"));
         QMessageBox::information(this, QStringLiteral("完成"),
                                  QStringLiteral("已生成切片、config.yaml 与 run.gcode。"));
+    } else if (canceled) {
+        appendLog(QStringLiteral("Canceled: %1").arg(summary));
+        statusBar()->showMessage(QStringLiteral("Canceled"));
     } else {
         appendLog(QStringLiteral("Failed: %1").arg(summary));
         statusBar()->showMessage(QStringLiteral("Failed"));

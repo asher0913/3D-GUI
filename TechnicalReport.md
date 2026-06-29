@@ -44,7 +44,7 @@ slice_merge_tool --config <config.yaml> --output <merged_dir>
 |---|---|---|
 | UI | `ui/MainWindow.ui`, `src/MainWindow.*` | Qt Designer-editable UI with resizable main window |
 | 3D View | `src/OpenGLView.*` | Lightweight OpenGL viewport based on `QOpenGLWidget` |
-| STL Loading | `src/StlMesh.*` | Binary/ASCII STL import path |
+| STL Loading | `src/StlMesh.*` | Binary/ASCII STL import path with finite-coordinate and size validation |
 | STEP Loading | `tools/step_to_stl_parts.py`, `backend_dist/step_to_stl_parts` | Converts STEP solids to per-part STL plus `manifest.json` |
 | Slicing | `src/SliceExporter.*` | Per-material PNG export |
 | Config | `src/ConfigWriter.*` | Writes backend-compatible `config.yaml` |
@@ -97,10 +97,10 @@ This choice keeps the viewport lightweight and portable:
 - It can run on macOS, Windows, and Linux as long as the machine has a functional OpenGL driver or compatibility layer.
 
 For the current application scope, OpenGL is not expected to be the bottleneck. The heavier parts are geometry slicing, PNG generation, image merging, and backend I/O. The current models used for demonstration render smoothly.
+The viewport now uploads each mesh into OpenGL vertex buffers once and reuses those buffers during rendering. Shared mesh ownership is used for duplicated models, so copying a model no longer deep-copies all vertex data. Rim lighting now uses normals transformed into view space, so the visual highlight stays camera-relative.
 
 Potential future upgrade paths:
 
-- Use vertex buffers more aggressively for very large STL files.
 - Add mesh decimation or preview LOD.
 - Move more slicing work to worker threads.
 - Replace only the viewport implementation if a future graphics backend becomes necessary.
@@ -356,7 +356,39 @@ Additional STEP validation:
 - `backend_dist/step_to_stl_parts --input demo_step/step示例.step --output /tmp/mms_step_exe_test` produced the same two-part output.
 - `open -n build-x86_64/MultiMaterialSlicer.app --args --selftest demo_step/step示例.step` completed and generated `config.yaml`, per-material PNGs, merged PNGs, and `run.gcode`.
 
-## 15. Current Risks and Follow-Ups
+## 15. Stability And Performance Fixes
+
+The latest stabilization pass addressed the reviewed critical/high-priority issues:
+
+- `SliceExporter` now rejects non-finite transformed geometry and validates layer count math before integer conversion.
+- `StlMesh` rejects NaN/Inf vertices, validates binary STL declared sizes, and checks triangle-count multiplication before reserving memory.
+- Model tree material editors resolve models by stable IDs rather than stale row indices.
+- `SliceWorker` supports progress signals, user cancellation, backend startup timeout, and a 10-minute backend execution timeout with process kill.
+- STEP conversion also has a timeout instead of waiting forever.
+- `OpenGLView` uses VBOs for model meshes and releases unused buffers.
+- Duplicated `ModelInstance` objects share mesh data through `QSharedPointer<StlMesh>`.
+- Strength/current interpolation sorts finite mapping points before interpolation, so YAML mapping order no longer changes the result.
+
+Verification performed after these fixes:
+
+- `cmake --build build-x86_64 -j$(sysctl -n hw.ncpu)` passed.
+- `xmllint --noout ui/MainWindow.ui` passed.
+- `python3 -m py_compile slice_1080p.py tools/step_to_stl_parts.py` passed.
+- Bad STL with a NaN vertex was rejected without crashing the workflow.
+- `build-x86_64/MultiMaterialSlicer.app/Contents/MacOS/MultiMaterialSlicer --selftest demo_step/step示例.step` passed.
+- `bash scripts/package_macos.sh` regenerated `dist/MultiMaterialSlicer-mac-x86_64.zip`.
+- The final zip was extracted to `/tmp/mms_pkg_fix_verify`, then `--selftest demo_step/step示例.step` passed from the extracted app.
+- `codesign --verify --deep --strict --verbose=2 /tmp/mms_pkg_fix_verify/MultiMaterialSlicer.app` passed.
+- Computer Use GUI validation on the extracted app completed STL import, material edits, transform edit, duplicate/remove, slicing page inspection, full GUI export, success dialog, and output-file verification.
+
+The regenerated macOS zip is:
+
+```text
+dist/MultiMaterialSlicer-mac-x86_64.zip
+SHA-256: 63a27431bb87b678ac7c4400f7ae99e493c91fc6704a6ffc2706416dbaf1b3e3
+```
+
+## 16. Current Risks and Follow-Ups
 
 Remaining engineering follow-ups:
 
@@ -364,11 +396,11 @@ Remaining engineering follow-ups:
 - Decide whether macOS should ship x86_64 only, arm64 only, or universal.
 - If distributing STEP import to Intel Mac users, rebuild `step_to_stl_parts` under an x86_64 Python environment. The helper built on this Apple Silicon machine is arm64 and has been validated on Apple Silicon.
 - Add formal installer/signing/notarization for production distribution.
-- Improve high-poly STL performance if real customer files are much larger than demo files.
+- Improve high-poly STL performance further if real customer files are much larger than demo files, mainly through preview LOD or background import.
 - Extend the STEP converter to preserve full XCAF assembly hierarchy if production STEP files need deeper nested CAD trees beyond per-solid splitting.
 - Strengthen the slicer geometry algorithm if production accuracy requirements exceed the current lightweight implementation.
 - Add repeatable GUI automation that does not depend on native OS file dialogs.
 
-## 16. Conclusion
+## 17. Conclusion
 
 The current implementation satisfies the requested integrated demo workflow: a Qt/C++ APP with editable `.ui`, OpenGL STL/STEP preview, per-model transform/material control, STEP parent/child tree behavior, adjustable material count, model duplication, YAML machine/material presets, config import, editable advanced machine/GCode parameters, per-material PNG export, backend command-line invocation, generated `config.yaml`, generated `run.gcode`, macOS packaging, and actual GUI validation.

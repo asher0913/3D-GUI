@@ -4,11 +4,24 @@
 #include <QtMath>
 
 #include <algorithm>
+#include <limits>
 
 OpenGLView::OpenGLView(QWidget* parent)
     : QOpenGLWidget(parent)
 {
     setFocusPolicy(Qt::StrongFocus);
+}
+
+OpenGLView::~OpenGLView()
+{
+    if (context()) {
+        makeCurrent();
+    }
+    qDeleteAll(m_meshBuffers);
+    m_meshBuffers.clear();
+    if (context()) {
+        doneCurrent();
+    }
 }
 
 void OpenGLView::setModels(const QVector<ModelInstance>* models)
@@ -42,11 +55,11 @@ void OpenGLView::initializeGL()
         "attribute vec3 position;\n"
         "attribute vec3 normal;\n"
         "uniform mat4 mvp;\n"
-        "uniform mat4 modelMatrix;\n"
+        "uniform mat3 normalMatrix;\n"
         "varying vec3 vNormal;\n"
         "void main() {\n"
         "    gl_Position = mvp * vec4(position, 1.0);\n"
-        "    vNormal = (modelMatrix * vec4(normal, 0.0)).xyz;\n"
+        "    vNormal = normalMatrix * normal;\n"
         "}\n");
     m_program->addShaderFromSourceCode(QOpenGLShader::Fragment,
         "uniform vec3 baseColor;\n"
@@ -117,16 +130,25 @@ void OpenGLView::paintGL()
         return;
     }
 
+    QSet<const StlMesh*> liveMeshes;
     for (int i = 0; i < m_models->size(); ++i) {
         const ModelInstance& model = m_models->at(i);
-        if (!model.visible || model.mesh.isEmpty()) {
+        if (model.visible && model.mesh && !model.mesh->isEmpty()) {
+            liveMeshes.insert(model.mesh.data());
+        }
+    }
+    releaseUnusedBuffers(liveMeshes);
+
+    for (int i = 0; i < m_models->size(); ++i) {
+        const ModelInstance& model = m_models->at(i);
+        if (!model.visible || !model.mesh || model.mesh->isEmpty()) {
             continue;
         }
         QColor color = model.color;
         if (i == m_selectedIndex) {
             color = color.lighter(145);
         }
-        drawMesh(model.mesh.vertices(), model.mesh.normals(), model.transform.matrix(), color);
+        drawModelMesh(*model.mesh, model.transform.matrix(), color);
     }
 }
 
@@ -228,8 +250,9 @@ void OpenGLView::drawMesh(const QVector<QVector3D>& vertices,
 
     m_program->bind();
     const QMatrix4x4 mvp = m_projection * m_view * model;
+    const QMatrix3x3 normalMatrix = (m_view * model).normalMatrix();
     m_program->setUniformValue("mvp", mvp);
-    m_program->setUniformValue("modelMatrix", model);
+    m_program->setUniformValue("normalMatrix", normalMatrix);
     m_program->setUniformValue("baseColor",
         QVector3D(color.redF(), color.greenF(), color.blueF()));
 
@@ -245,6 +268,89 @@ void OpenGLView::drawMesh(const QVector<QVector3D>& vertices,
     m_program->disableAttributeArray(positionLocation);
     m_program->disableAttributeArray(normalLocation);
     m_program->release();
+}
+
+void OpenGLView::drawModelMesh(const StlMesh& mesh,
+                               const QMatrix4x4& model,
+                               const QColor& color)
+{
+    MeshBuffers* buffers = buffersForMesh(mesh);
+    if (!buffers || buffers->vertexCount <= 0) {
+        return;
+    }
+
+    m_program->bind();
+    const QMatrix4x4 mvp = m_projection * m_view * model;
+    const QMatrix3x3 normalMatrix = (m_view * model).normalMatrix();
+    m_program->setUniformValue("mvp", mvp);
+    m_program->setUniformValue("normalMatrix", normalMatrix);
+    m_program->setUniformValue("baseColor",
+        QVector3D(color.redF(), color.greenF(), color.blueF()));
+
+    const int positionLocation = m_program->attributeLocation("position");
+    const int normalLocation = m_program->attributeLocation("normal");
+    m_program->enableAttributeArray(positionLocation);
+    m_program->enableAttributeArray(normalLocation);
+
+    buffers->vertexBuffer.bind();
+    m_program->setAttributeBuffer(positionLocation, GL_FLOAT, 0, 3, sizeof(QVector3D));
+    buffers->normalBuffer.bind();
+    m_program->setAttributeBuffer(normalLocation, GL_FLOAT, 0, 3, sizeof(QVector3D));
+
+    glDrawArrays(GL_TRIANGLES, 0, buffers->vertexCount);
+
+    buffers->normalBuffer.release();
+    buffers->vertexBuffer.release();
+    m_program->disableAttributeArray(positionLocation);
+    m_program->disableAttributeArray(normalLocation);
+    m_program->release();
+}
+
+OpenGLView::MeshBuffers* OpenGLView::buffersForMesh(const StlMesh& mesh)
+{
+    const StlMesh* key = &mesh;
+    if (m_meshBuffers.contains(key)) {
+        return m_meshBuffers.value(key);
+    }
+
+    if (mesh.vertices().isEmpty() || mesh.normals().size() != mesh.vertices().size()) {
+        return nullptr;
+    }
+    const qsizetype vertexBytes = static_cast<qsizetype>(mesh.vertices().size()) * static_cast<qsizetype>(sizeof(QVector3D));
+    const qsizetype normalBytes = static_cast<qsizetype>(mesh.normals().size()) * static_cast<qsizetype>(sizeof(QVector3D));
+    if (vertexBytes > std::numeric_limits<int>::max() || normalBytes > std::numeric_limits<int>::max()) {
+        return nullptr;
+    }
+
+    auto* buffers = new MeshBuffers();
+    buffers->vertexCount = mesh.vertices().size();
+    buffers->vertexBuffer.create();
+    buffers->vertexBuffer.bind();
+    buffers->vertexBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
+    buffers->vertexBuffer.allocate(mesh.vertices().constData(), static_cast<int>(vertexBytes));
+    buffers->vertexBuffer.release();
+
+    buffers->normalBuffer.create();
+    buffers->normalBuffer.bind();
+    buffers->normalBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
+    buffers->normalBuffer.allocate(mesh.normals().constData(), static_cast<int>(normalBytes));
+    buffers->normalBuffer.release();
+
+    m_meshBuffers.insert(key, buffers);
+    return buffers;
+}
+
+void OpenGLView::releaseUnusedBuffers(const QSet<const StlMesh*>& liveMeshes)
+{
+    auto it = m_meshBuffers.begin();
+    while (it != m_meshBuffers.end()) {
+        if (liveMeshes.contains(it.key())) {
+            ++it;
+            continue;
+        }
+        delete it.value();
+        it = m_meshBuffers.erase(it);
+    }
 }
 
 void OpenGLView::mousePressEvent(QMouseEvent* event)

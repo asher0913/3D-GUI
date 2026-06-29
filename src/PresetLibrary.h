@@ -4,7 +4,9 @@
 #include <QString>
 #include <QVector>
 
+#include <algorithm>
 #include <cmath>
+#include <utility>
 
 // One printer/machine preset loaded from the YAML preset library.
 struct MachinePreset {
@@ -31,32 +33,52 @@ struct MachinePreset {
         if (outOfRange) {
             *outOfRange = false;
         }
+        if (!std::isfinite(strength)) {
+            if (outOfRange) {
+                *outOfRange = true;
+            }
+            return hasMap() ? currentMap.first() : 0;
+        }
         if (!hasMap()) {
             return static_cast<int>(std::lround(strength));
         }
-        const int n = strengthMap.size();
-        if (strength <= strengthMap.first()) {
-            if (outOfRange && strength < strengthMap.first()) {
-                *outOfRange = true;
+        QVector<std::pair<double, int>> points;
+        points.reserve(strengthMap.size());
+        for (int i = 0; i < strengthMap.size(); ++i) {
+            if (std::isfinite(strengthMap[i])) {
+                points.append(std::make_pair(strengthMap[i], currentMap[i]));
             }
-            return currentMap.first();
         }
-        if (strength >= strengthMap.last()) {
-            if (outOfRange && strength > strengthMap.last()) {
+        if (points.isEmpty()) {
+            return static_cast<int>(std::lround(strength));
+        }
+        std::sort(points.begin(), points.end(), [](const auto& a, const auto& b) {
+            return a.first < b.first;
+        });
+
+        const int n = points.size();
+        if (strength <= points.first().first) {
+            if (outOfRange && strength < points.first().first) {
                 *outOfRange = true;
             }
-            return currentMap.last();
+            return points.first().second;
+        }
+        if (strength >= points.last().first) {
+            if (outOfRange && strength > points.last().first) {
+                *outOfRange = true;
+            }
+            return points.last().second;
         }
         for (int i = 0; i + 1 < n; ++i) {
-            const double s0 = strengthMap[i];
-            const double s1 = strengthMap[i + 1];
+            const double s0 = points[i].first;
+            const double s1 = points[i + 1].first;
             if (strength >= s0 && strength <= s1) {
                 const double t = (s1 == s0) ? 0.0 : (strength - s0) / (s1 - s0);
-                const double cur = currentMap[i] + t * (currentMap[i + 1] - currentMap[i]);
+                const double cur = points[i].second + t * (points[i + 1].second - points[i].second);
                 return static_cast<int>(std::lround(cur));
             }
         }
-        return currentMap.last();
+        return points.last().second;
     }
 
     // Machine current -> light strength. Used to show a strength value for legacy
@@ -66,22 +88,39 @@ struct MachinePreset {
         if (!hasMap()) {
             return current;
         }
-        const int n = currentMap.size();
-        if (current <= currentMap.first()) {
-            return strengthMap.first();
+        if (!std::isfinite(current)) {
+            return strengthMap.isEmpty() ? 0.0 : strengthMap.first();
         }
-        if (current >= currentMap.last()) {
-            return strengthMap.last();
-        }
-        for (int i = 0; i + 1 < n; ++i) {
-            const double c0 = currentMap[i];
-            const double c1 = currentMap[i + 1];
-            if (current >= c0 && current <= c1) {
-                const double t = (c1 == c0) ? 0.0 : (current - c0) / (c1 - c0);
-                return strengthMap[i] + t * (strengthMap[i + 1] - strengthMap[i]);
+        QVector<std::pair<int, double>> points;
+        points.reserve(currentMap.size());
+        for (int i = 0; i < currentMap.size(); ++i) {
+            if (std::isfinite(strengthMap[i])) {
+                points.append(std::make_pair(currentMap[i], strengthMap[i]));
             }
         }
-        return strengthMap.last();
+        if (points.isEmpty()) {
+            return current;
+        }
+        std::sort(points.begin(), points.end(), [](const auto& a, const auto& b) {
+            return a.first < b.first;
+        });
+
+        const int n = points.size();
+        if (current <= points.first().first) {
+            return points.first().second;
+        }
+        if (current >= points.last().first) {
+            return points.last().second;
+        }
+        for (int i = 0; i + 1 < n; ++i) {
+            const double c0 = points[i].first;
+            const double c1 = points[i + 1].first;
+            if (current >= c0 && current <= c1) {
+                const double t = (c1 == c0) ? 0.0 : (current - c0) / (c1 - c0);
+                return points[i].second + t * (points[i + 1].second - points[i].second);
+            }
+        }
+        return points.last().second;
     }
 };
 

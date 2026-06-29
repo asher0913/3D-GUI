@@ -12,6 +12,11 @@
 
 namespace {
 
+bool isFiniteVector(const QVector3D& v)
+{
+    return std::isfinite(v.x()) && std::isfinite(v.y()) && std::isfinite(v.z());
+}
+
 float readFloatLE(const char* p)
 {
     quint32 raw = qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(p));
@@ -28,11 +33,11 @@ quint32 readUInt32LE(const char* p)
 
 QVector3D safeNormal(const QVector3D& a, const QVector3D& b, const QVector3D& c, const QVector3D& supplied)
 {
-    if (supplied.lengthSquared() > 1.0e-10f) {
+    if (isFiniteVector(supplied) && supplied.lengthSquared() > 1.0e-10f) {
         return supplied.normalized();
     }
     QVector3D n = QVector3D::crossProduct(b - a, c - a);
-    if (n.lengthSquared() <= 1.0e-10f) {
+    if (!isFiniteVector(n) || n.lengthSquared() <= 1.0e-10f) {
         return QVector3D(0.0f, 0.0f, 1.0f);
     }
     return n.normalized();
@@ -65,8 +70,8 @@ bool StlMesh::load(const QString& filePath, QString* errorMessage)
     bool loaded = false;
     if (!looksAscii && bytes.size() >= 84) {
         const quint32 triangleCount = readUInt32LE(bytes.constData() + 80);
-        const qsizetype expectedSize = 84 + static_cast<qsizetype>(triangleCount) * 50;
-        if (triangleCount > 0 && expectedSize <= bytes.size()) {
+        const quint64 expectedSize = 84ull + static_cast<quint64>(triangleCount) * 50ull;
+        if (triangleCount > 0 && expectedSize <= static_cast<quint64>(bytes.size())) {
             loaded = loadBinary(bytes, errorMessage);
         }
     }
@@ -91,18 +96,25 @@ bool StlMesh::load(const QString& filePath, QString* errorMessage)
 bool StlMesh::loadBinary(const QByteArray& bytes, QString* errorMessage)
 {
     const quint32 triangleCount = readUInt32LE(bytes.constData() + 80);
-    const qsizetype expectedSize = 84 + static_cast<qsizetype>(triangleCount) * 50;
+    const quint64 expectedSize = 84ull + static_cast<quint64>(triangleCount) * 50ull;
     // Trailing padding is tolerated (expectedSize <= file size); a file that is too
     // short for the declared triangle count is rejected.
-    if (expectedSize > bytes.size()) {
+    if (expectedSize > static_cast<quint64>(bytes.size())) {
         if (errorMessage) {
             *errorMessage = QStringLiteral("Binary STL size does not match triangle count");
         }
         return false;
     }
+    if (triangleCount > static_cast<quint32>(std::numeric_limits<int>::max() / 3)) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Binary STL triangle count is too large");
+        }
+        return false;
+    }
 
-    m_vertices.reserve(static_cast<int>(triangleCount) * 3);
-    m_normals.reserve(static_cast<int>(triangleCount) * 3);
+    const int vertexReserve = static_cast<int>(triangleCount * 3u);
+    m_vertices.reserve(vertexReserve);
+    m_normals.reserve(vertexReserve);
 
     const char* p = bytes.constData() + 84;
     for (quint32 i = 0; i < triangleCount; ++i, p += 50) {
@@ -110,7 +122,12 @@ bool StlMesh::loadBinary(const QByteArray& bytes, QString* errorMessage)
         QVector3D a(readFloatLE(p + 12), readFloatLE(p + 16), readFloatLE(p + 20));
         QVector3D b(readFloatLE(p + 24), readFloatLE(p + 28), readFloatLE(p + 32));
         QVector3D c(readFloatLE(p + 36), readFloatLE(p + 40), readFloatLE(p + 44));
-        appendTriangle(normal, a, b, c);
+        if (!appendTriangle(normal, a, b, c)) {
+            if (errorMessage) {
+                *errorMessage = QStringLiteral("STL contains non-finite vertex coordinates");
+            }
+            return false;
+        }
     }
     return true;
 }
@@ -141,13 +158,21 @@ bool StlMesh::loadAscii(const QByteArray& bytes, QString* errorMessage)
     m_vertices.reserve(temp.size());
     m_normals.reserve(temp.size());
     for (int i = 0; i < temp.size(); i += 3) {
-        appendTriangle(QVector3D(), temp[i], temp[i + 1], temp[i + 2]);
+        if (!appendTriangle(QVector3D(), temp[i], temp[i + 1], temp[i + 2])) {
+            if (errorMessage) {
+                *errorMessage = QStringLiteral("STL contains non-finite vertex coordinates");
+            }
+            return false;
+        }
     }
     return true;
 }
 
-void StlMesh::appendTriangle(const QVector3D& normal, const QVector3D& a, const QVector3D& b, const QVector3D& c)
+bool StlMesh::appendTriangle(const QVector3D& normal, const QVector3D& a, const QVector3D& b, const QVector3D& c)
 {
+    if (!isFiniteVector(a) || !isFiniteVector(b) || !isFiniteVector(c)) {
+        return false;
+    }
     const QVector3D n = safeNormal(a, b, c, normal);
     m_vertices.append(a);
     m_vertices.append(b);
@@ -155,6 +180,7 @@ void StlMesh::appendTriangle(const QVector3D& normal, const QVector3D& a, const 
     m_normals.append(n);
     m_normals.append(n);
     m_normals.append(n);
+    return true;
 }
 
 void StlMesh::updateBounds()

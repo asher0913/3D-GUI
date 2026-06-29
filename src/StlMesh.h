@@ -20,7 +20,7 @@ private:
     bool loadBinary(const QByteArray& bytes, QString* errorMessage);
     bool loadAscii(const QByteArray& bytes, QString* errorMessage);
     void updateBounds();
-    void appendTriangle(const QVector3D& normal, const QVector3D& a, const QVector3D& b, const QVector3D& c);
+    bool appendTriangle(const QVector3D& normal, const QVector3D& a, const QVector3D& b, const QVector3D& c);
 
     QVector<QVector3D> m_vertices;
     QVector<QVector3D> m_normals;

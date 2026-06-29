@@ -24,6 +24,11 @@ struct Segment {
     QPointF b;
 };
 
+bool isFiniteVector(const QVector3D& v)
+{
+    return std::isfinite(v.x()) && std::isfinite(v.y()) && std::isfinite(v.z());
+}
+
 bool isNumericPng(const QFileInfo& info)
 {
     if (info.suffix().compare(QStringLiteral("png"), Qt::CaseInsensitive) != 0) {
@@ -183,7 +188,8 @@ bool SliceExporter::exportSlices(const QVector<ModelInstance>& models,
                                  const QString& outputRoot,
                                  QStringList* materialDirs,
                                  SliceExportStats* stats,
-                                 QString* errorMessage)
+                                 QString* errorMessage,
+                                 const SliceProgressCallback& progressCallback)
 {
     if (models.isEmpty()) {
         if (errorMessage) {
@@ -221,18 +227,24 @@ bool SliceExporter::exportSlices(const QVector<ModelInstance>& models,
     double maxZ = 0.0;
 
     for (const ModelInstance& model : models) {
-        if (!model.visible || model.mesh.isEmpty()) {
+        if (!model.visible || !model.mesh || model.mesh->isEmpty()) {
             continue;
         }
         const int material = std::max(0, std::min(settings.materialCount - 1, model.materialIndex));
         const QMatrix4x4 transform = model.transform.matrix();
-        const QVector<QVector3D>& vertices = model.mesh.vertices();
+        const QVector<QVector3D>& vertices = model.mesh->vertices();
         for (int i = 0; i + 2 < vertices.size(); i += 3) {
             Triangle tri {
                 transform.map(vertices[i]),
                 transform.map(vertices[i + 1]),
                 transform.map(vertices[i + 2])
             };
+            if (!isFiniteVector(tri.a) || !isFiniteVector(tri.b) || !isFiniteVector(tri.c)) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("Model contains non-finite transformed coordinates");
+                }
+                return false;
+            }
             maxZ = std::max(maxZ, static_cast<double>(tri.a.z()));
             maxZ = std::max(maxZ, static_cast<double>(tri.b.z()));
             maxZ = std::max(maxZ, static_cast<double>(tri.c.z()));
@@ -240,7 +252,20 @@ bool SliceExporter::exportSlices(const QVector<ModelInstance>& models,
         }
     }
 
-    const int layerCount = static_cast<int>(std::ceil(maxZ / settings.layerHeightMm));
+    if (!std::isfinite(maxZ) || !std::isfinite(settings.layerHeightMm)) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Invalid model height or layer height");
+        }
+        return false;
+    }
+    const double rawLayerCount = std::ceil(maxZ / settings.layerHeightMm);
+    if (!std::isfinite(rawLayerCount) || rawLayerCount > std::numeric_limits<int>::max() - 1) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Layer count is too large");
+        }
+        return false;
+    }
+    const int layerCount = static_cast<int>(rawLayerCount);
     if (layerCount <= 0) {
         if (errorMessage) {
             *errorMessage = QStringLiteral("Loaded models do not extend above Z=0");
@@ -261,6 +286,12 @@ bool SliceExporter::exportSlices(const QVector<ModelInstance>& models,
             const Triangle& tri = tris[t];
             const double zMin = std::min({tri.a.z(), tri.b.z(), tri.c.z()});
             const double zMax = std::max({tri.a.z(), tri.b.z(), tri.c.z()});
+            if (!std::isfinite(zMin) || !std::isfinite(zMax)) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("Model contains non-finite Z coordinates");
+                }
+                return false;
+            }
             int firstLayer = static_cast<int>(std::ceil(zMin / layerHeight));
             int lastLayer = static_cast<int>(std::floor(zMax / layerHeight));
             firstLayer = std::max(1, firstLayer);
@@ -274,6 +305,12 @@ bool SliceExporter::exportSlices(const QVector<ModelInstance>& models,
 
     QVector<int> imageCounts(settings.materialCount, 0);
     for (int layer = 1; layer <= layerCount; ++layer) {
+        if (progressCallback && !progressCallback(layer - 1, layerCount)) {
+            if (errorMessage) {
+                *errorMessage = QStringLiteral("Slice export canceled");
+            }
+            return false;
+        }
         const float z = static_cast<float>(layer * layerHeight);
         for (int material = 0; material < settings.materialCount; ++material) {
             const QVector<Triangle>& tris = trianglesByMaterial[material];
@@ -300,6 +337,12 @@ bool SliceExporter::exportSlices(const QVector<ModelInstance>& models,
                 return false;
             }
             imageCounts[material] += 1;
+        }
+        if (progressCallback && !progressCallback(layer, layerCount)) {
+            if (errorMessage) {
+                *errorMessage = QStringLiteral("Slice export canceled");
+            }
+            return false;
         }
     }
 

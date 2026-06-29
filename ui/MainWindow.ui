@@ -562,18 +562,54 @@
              </widget>
             </item>
             <item>
-             <widget class="QPushButton" name="runWorkflowButton">
-              <property name="minimumHeight">
-               <number>44</number>
+             <layout class="QHBoxLayout" name="workflowButtonLayout">
+              <item>
+               <widget class="QPushButton" name="runWorkflowButton">
+                <property name="minimumHeight">
+                 <number>44</number>
+                </property>
+                <property name="cursor">
+                 <cursorShape>PointingHandCursor</cursorShape>
+                </property>
+                <property name="toolTip">
+                 <string>按材料切片导出 PNG，生成 config.yaml，并调用后端工具合并出投影图与 run.gcode</string>
+                </property>
+                <property name="text">
+                 <string>导出切片并生成 GCode</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="cancelWorkflowButton">
+                <property name="minimumHeight">
+                 <number>44</number>
+                </property>
+                <property name="enabled">
+                 <bool>false</bool>
+                </property>
+                <property name="cursor">
+                 <cursorShape>PointingHandCursor</cursorShape>
+                </property>
+                <property name="text">
+                 <string>取消</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item>
+             <widget class="QProgressBar" name="workflowProgressBar">
+              <property name="minimum">
+               <number>0</number>
               </property>
-              <property name="cursor">
-               <cursorShape>PointingHandCursor</cursorShape>
+              <property name="maximum">
+               <number>100</number>
               </property>
-              <property name="toolTip">
-               <string>按材料切片导出 PNG，生成 config.yaml，并调用后端工具合并出投影图与 run.gcode</string>
+              <property name="value">
+               <number>0</number>
               </property>
-              <property name="text">
-               <string>导出切片并生成 GCode</string>
+              <property name="textVisible">
+               <bool>true</bool>
               </property>
              </widget>
             </item>

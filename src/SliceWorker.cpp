@@ -4,6 +4,7 @@
 #include "SliceExporter.h"
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QProcess>
 
@@ -12,6 +13,11 @@ SliceWorker::SliceWorker(QVector<ModelInstance> models, SliceSettings settings, 
     , m_models(std::move(models))
     , m_settings(std::move(settings))
 {
+}
+
+void SliceWorker::requestCancel()
+{
+    m_cancelRequested.store(true);
 }
 
 void SliceWorker::process()
@@ -23,15 +29,31 @@ void SliceWorker::process()
     QString error;
     QStringList materialDirs;
     SliceExportStats stats;
-    if (!SliceExporter::exportSlices(m_models, m_settings, outputDir, &materialDirs, &stats, &error)) {
+    auto progress = [this](int current, int total) {
+        if (m_cancelRequested.load()) {
+            return false;
+        }
+        emit progressChanged(current, total, QStringLiteral("正在导出切片"));
+        return true;
+    };
+    if (!SliceExporter::exportSlices(m_models, m_settings, outputDir, &materialDirs, &stats, &error, progress)) {
         emit finished(false, QStringLiteral("Slice export failed: %1").arg(error), outputDir);
+        return;
+    }
+    if (m_cancelRequested.load()) {
+        emit finished(false, QStringLiteral("工作流已取消"), outputDir);
         return;
     }
     emit logMessage(QStringLiteral("Wrote %1 layers per material").arg(stats.layerCount));
 
     const QString configPath = QDir(outputDir).absoluteFilePath(QStringLiteral("config.yaml"));
+    emit progressChanged(stats.layerCount, stats.layerCount, QStringLiteral("正在写入 config.yaml"));
     if (!ConfigWriter::writeYaml(m_settings, materialDirs, configPath, &error)) {
         emit finished(false, QStringLiteral("Config failed: %1").arg(error), outputDir);
+        return;
+    }
+    if (m_cancelRequested.load()) {
+        emit finished(false, QStringLiteral("工作流已取消"), outputDir);
         return;
     }
     emit logMessage(QStringLiteral("Wrote config: %1").arg(configPath));
@@ -68,11 +90,36 @@ void SliceWorker::process()
     process.setProgram(program);
     process.setArguments(args);
     process.start();
-    if (!process.waitForStarted()) {
+    if (!process.waitForStarted(30000)) {
         emit finished(false, QStringLiteral("后端工具启动失败: %1").arg(process.errorString()), outputDir);
         return;
     }
-    process.waitForFinished(-1);
+    emit progressChanged(0, 0, QStringLiteral("正在运行后端工具"));
+
+    constexpr qint64 backendTimeoutMs = 10 * 60 * 1000;
+    QElapsedTimer timer;
+    timer.start();
+    while (!process.waitForFinished(250)) {
+        if (m_cancelRequested.load()) {
+            process.kill();
+            process.waitForFinished(5000);
+            emit finished(false, QStringLiteral("工作流已取消"), outputDir);
+            return;
+        }
+        if (timer.elapsed() > backendTimeoutMs) {
+            process.kill();
+            process.waitForFinished(5000);
+            emit finished(false, QStringLiteral("后端工具运行超时，已终止。"), outputDir);
+            return;
+        }
+        if (process.state() == QProcess::NotRunning) {
+            break;
+        }
+    }
+    if (m_cancelRequested.load()) {
+        emit finished(false, QStringLiteral("工作流已取消"), outputDir);
+        return;
+    }
 
     const QString stdoutText = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
     const QString stderrText = QString::fromUtf8(process.readAllStandardError()).trimmed();
@@ -88,5 +135,6 @@ void SliceWorker::process()
         return;
     }
 
+    emit progressChanged(1, 1, QStringLiteral("完成"));
     emit finished(true, mergedDir, mergedDir);
 }
