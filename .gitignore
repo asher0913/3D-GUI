@@ -84,6 +84,11 @@ backend_dist/
 Thumbs.db
 Desktop.ini
 
+# Project working notes (not for distribution)
+下一步修改需求提示词.md
+代码生成与修改说明.md
+打包与会议演示指南.md
+
 # Editor / IDE
 .idea/
 .vscode/
