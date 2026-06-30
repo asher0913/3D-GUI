@@ -4,13 +4,16 @@ MultiMaterialSlicer 是一个面向多材料光固化打印机的 Qt/C++ 桌面 
 
 当前代码重点面向 Windows 可用、macOS 可演示、Linux 后续可迁移的路线。界面使用 Qt 5.12.12 和 `.ui` 文件，3D 视图使用轻量的 `QOpenGLWidget`。
 
+更新时间：2026-06-30
+
 ## 当前能力
 
 - 左侧 3D 视图可以显示多个 STL 模型，也可以导入 STEP/STP 装配体。
 - 3D 视图使用 OpenGL VBO 缓存网格数据，模型加载后不会在每帧重复上传全部顶点。
 - 底板网格/边框/坐标轴几何会缓存，只有构建平台尺寸变化时才重建。
-- STEP 导入会拆出多个子实体，在模型树中显示为“STEP 文件父节点 -> 子实体叶子节点”。
-- 选中 STEP 父节点时，平移、旋转、缩放会作为整体应用到所有子实体；选中子实体时，可以单独设置材料，但不单独破坏装配体相对位置。
+- STEP 导入会保留装配层级，在模型树中显示为“根装配体 -> 子装配体 -> 子实体叶子节点”的多级树。
+- 选中任意 STEP 装配体节点时，平移、旋转、缩放会作为整体应用到该节点下所有子实体；父子装配体的变换会按层级矩阵叠加。
+- 选中 STEP 子实体时，可以单独设置材料，但不能单独破坏装配体相对位置。
 - 选中模型后可以在右侧输入平移、旋转、等比例缩放数值。
 - 选中模型后可以复制，复制件保留网格、变换、材料和颜色。
 - 每个模型可以分配材料槽，默认材料数量为 3，用户可以调整材料数量。
@@ -61,6 +64,14 @@ MultiMaterialSlicer 是一个面向多材料光固化打印机的 Qt/C++ 桌面 
 └── ui/
     └── MainWindow.ui
 ```
+
+## 推荐阅读顺序
+
+1. `README.md`：项目入口、功能范围、构建、打包、输出结构和验证结果。
+2. `打包与会议演示指南.md`：会议现场如何打开、怎么演示、用哪些 STL/STEP。
+3. `代码生成与修改说明.md`：详细流水账，说明每个模块做了哪些修改。
+4. `TechnicalReport.md`：技术架构、数据流、模块职责、风险和后续工作。
+5. `下一步修改需求提示词.md`：可以直接交给其他 AI 或开发者的后续开发提示词。
 
 ## macOS 构建和打包
 
@@ -132,6 +143,8 @@ powershell -ExecutionPolicy Bypass -File scripts\package_backend_windows.ps1
 powershell -ExecutionPolicy Bypass -File scripts\package_step_windows.ps1
 ```
 
+Windows 包脚本已经准备好，但最终 Windows zip 应在 Windows 实机上生成和验证。
+
 ## 后端工具
 
 正式工作流里，APP 调用命令行后端：
@@ -199,6 +212,7 @@ output/
 - 2026-06-29 重新打包 `dist/MultiMaterialSlicer-mac-x86_64.zip`，从最终 zip 解包后运行 `--selftest demo_step/step示例.step` 通过，并通过 `codesign --verify --deep --strict`。
 - 2026-06-29 使用 Computer Use 操作最终解包 APP：通过文件选择器导入 `demo_stl/multi_A_base_plate.stl`，修改材料 1 -> 2 -> 3，修改 X 位移，复制并删除模型，切到切片页，从 GUI 点击“导出切片并生成 GCode”，成功生成 `/Users/asher/MultiMaterialSlicerOutput/config.yaml`、材料 PNG、`merged/run.gcode` 和 102 个 merged 文件。
 - 2026-06-30 对 Medium 清单中可直接落地的项做了修复：材料转换参数可配置、二进制/ASCII STL 判别更稳、预设库非法数值报错、所有模型不可见时阻止运行、Python 查找使用 PATH 和多版本 fallback、底板几何缓存、切片 QImage 复用、STL 大文件上限、配置路径支持 `--config`/编译期路径、装配体/模型 ID 使用 64 位计数。
+- 2026-06-30 使用 Computer Use 实际操作最终打包 APP，导入嵌套 STEP 测试件，确认 GUI 树显示 `RootAssembly -> InnerAssembly -> InnerBase/InnerPeg`，`InnerPeg` 可单独改为材料2，`InnerAssembly` 位移只带动其子实体，`RootAssembly` 位移会与子装配体位移正确叠加，复制和删除装配体可用。
 
 早期自动化测试中也使用过启动参数导入 STL/STEP 来覆盖同一套导入代码。人工演示时，“导入 STL”和“导入 STEP”按钮会打开系统文件选择器，可以正常选择 `demo_stl` 中的 STL 文件和 `demo_step` 中的 STEP 文件。
 
@@ -224,3 +238,5 @@ demo_step/step示例.step
 ```
 
 导入后模型树会显示一个 STEP 父节点和两个子实体。建议把 `实体2` 的材料列从 1 改成 2，再选中父节点调整 X/Y/旋转，展示“父级整体移动、子实体独立材料”的流程。
+
+多级 STEP 装配体验证使用过包含“根装配体 -> 子装配体 -> 子实体”的测试件；导入后可检查子实体独立材料、子装配体整体移动和父子装配体变换叠加。
