@@ -2,10 +2,12 @@
 
 #include <QByteArray>
 #include <QFile>
+#include <QFileInfo>
 #include <QRegularExpression>
 #include <QtEndian>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -31,6 +33,35 @@ quint32 readUInt32LE(const char* p)
     return qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(p));
 }
 
+bool startsWithAsciiSolid(const QByteArray& bytes)
+{
+    int i = 0;
+    while (i < bytes.size() && std::isspace(static_cast<unsigned char>(bytes.at(i)))) {
+        ++i;
+    }
+    if (i + 5 > bytes.size()) {
+        return false;
+    }
+    const QByteArray head = bytes.mid(i, 5).toLower();
+    if (head != QByteArrayLiteral("solid")) {
+        return false;
+    }
+    return i + 5 == bytes.size()
+        || std::isspace(static_cast<unsigned char>(bytes.at(i + 5)));
+}
+
+bool isPlausibleBinaryStl(const QByteArray& bytes)
+{
+    if (bytes.size() < 84) {
+        return false;
+    }
+    const quint32 triangleCount = readUInt32LE(bytes.constData() + 80);
+    const quint64 expectedSize = 84ull + static_cast<quint64>(triangleCount) * 50ull;
+    return triangleCount > 0
+        && expectedSize <= static_cast<quint64>(bytes.size())
+        && triangleCount <= static_cast<quint32>(std::numeric_limits<int>::max() / 3);
+}
+
 QVector3D safeNormal(const QVector3D& a, const QVector3D& b, const QVector3D& c, const QVector3D& supplied)
 {
     if (isFiniteVector(supplied) && supplied.lengthSquared() > 1.0e-10f) {
@@ -54,28 +85,47 @@ bool StlMesh::load(const QString& filePath, QString* errorMessage)
         }
         return false;
     }
+    constexpr qint64 maxStlBytes = 512ll * 1024ll * 1024ll;
+    const qint64 fileSize = file.size();
+    if (fileSize > maxStlBytes) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("STL file is too large for the preview loader (%1 MB > %2 MB)")
+                .arg(fileSize / (1024 * 1024))
+                .arg(maxStlBytes / (1024 * 1024));
+        }
+        return false;
+    }
 
     const QByteArray bytes = file.readAll();
+    if (bytes.size() != fileSize) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Could not read the whole STL file");
+        }
+        return false;
+    }
     m_vertices.clear();
     m_normals.clear();
 
-    // Decide between binary and ASCII. A binary STL is 84 + 50*N bytes, but some
-    // exporters append trailing metadata/padding, so we accept files that are at
-    // least that large rather than requiring an exact match. An ASCII STL is text
-    // that contains "facet" / "vertex" keywords; we check that first so a text file
-    // is never misread as binary.
-    const bool looksAscii = bytes.contains(QByteArrayLiteral("facet"))
+    // Prefer the binary parser for files whose 80-byte STL header happens to
+    // contain "facet" or "vertex". ASCII STL usually starts with "solid"; if it
+    // does, try ASCII first and fall back to binary for binary-STL exporters that
+    // also use a "solid ..." header.
+    const bool binaryCandidate = isPlausibleBinaryStl(bytes);
+    const bool asciiSolid = startsWithAsciiSolid(bytes);
+    const bool asciiKeywords = bytes.contains(QByteArrayLiteral("facet"))
         && bytes.contains(QByteArrayLiteral("vertex"));
 
     bool loaded = false;
-    if (!looksAscii && bytes.size() >= 84) {
-        const quint32 triangleCount = readUInt32LE(bytes.constData() + 80);
-        const quint64 expectedSize = 84ull + static_cast<quint64>(triangleCount) * 50ull;
-        if (triangleCount > 0 && expectedSize <= static_cast<quint64>(bytes.size())) {
-            loaded = loadBinary(bytes, errorMessage);
-        }
+    if (binaryCandidate && !asciiSolid) {
+        loaded = loadBinary(bytes, errorMessage);
     }
 
+    if (!loaded && (asciiSolid || (!binaryCandidate && asciiKeywords))) {
+        loaded = loadAscii(bytes, errorMessage);
+    }
+    if (!loaded && binaryCandidate) {
+        loaded = loadBinary(bytes, errorMessage);
+    }
     if (!loaded) {
         loaded = loadAscii(bytes, errorMessage);
     }

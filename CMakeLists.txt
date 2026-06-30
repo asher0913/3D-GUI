@@ -40,9 +40,13 @@ target_include_directories(MultiMaterialSlicer PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}
 )
 
+set(PRESET_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/config/machine_material_presets.yaml)
+target_compile_definitions(MultiMaterialSlicer PRIVATE
+    PRESET_CONFIG_PATH="${PRESET_CONFIG}"
+)
+
 target_link_libraries(MultiMaterialSlicer PRIVATE Qt5::Widgets Qt5::OpenGL)
 
-set(PRESET_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/config/machine_material_presets.yaml)
 if(WIN32)
     set(BACKEND_TOOL ${CMAKE_CURRENT_SOURCE_DIR}/backend_dist/slice_merge_tool.exe)
     set(BACKEND_OUTPUT_NAME slice_merge_tool.exe)

@@ -64,7 +64,8 @@ private:
     void setModelTreeCurrentAssembly(const QString& assemblyId);
     void loadSelectedModelToControls();
     void setTransformEditorsEnabled(bool enabled);
-    void applyAssemblyTransform(const QString& assemblyId, const Transform& transform);
+    void refreshAssemblyTransforms();
+    void refreshAssemblyTransformsRecursive(const QString& assemblyId, const QMatrix4x4& parentMatrix);
     void removeAssembly(const QString& assemblyId);
     void appendLog(const QString& text);
     void setRunningState(bool running);
@@ -90,14 +91,16 @@ private:
     QMap<QString, Transform> m_assemblyTransforms;
     QMap<QString, QString> m_assemblyNames;
     QStringList m_assemblyOrder;
+    QMap<QString, QStringList> m_assemblyChildren;
     PresetLibrary m_presets;
     bool m_configReady = false;
     bool m_loadingSelection = false;
     bool m_rebuildingTable = false;
     bool m_rebuildingModelTree = false;
-    int m_nextAssemblyId = 1;
+    quint64 m_nextAssemblyId = 1;
     QThread* m_workerThread = nullptr;
     SliceWorker* m_worker = nullptr;
     bool m_selfTest = false;
-    int m_nextModelId = 1;
+    quint64 m_nextModelId = 1;
+    QString m_configPathOverride;
 };

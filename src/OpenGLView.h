@@ -43,6 +43,7 @@ private:
                        const QColor& color);
     void drawBackground();
     void drawBuildPlate();
+    void updateBuildPlateGeometry();
     void releaseUnusedBuffers(const QSet<const StlMesh*>& liveMeshes);
 
     struct MeshBuffers {
@@ -73,4 +74,16 @@ private:
     QMatrix4x4 m_projection;
     QMatrix4x4 m_view;
     QHash<const StlMesh*, MeshBuffers*> m_meshBuffers;
+
+    bool m_plateGeometryDirty = true;
+    QVector<QVector3D> m_plateVertices;
+    QVector<QVector3D> m_plateNormals;
+    QVector<QVector3D> m_gridVertices;
+    QVector<QVector3D> m_gridNormals;
+    QVector<QVector3D> m_borderVertices;
+    QVector<QVector3D> m_borderNormals;
+    QVector<QVector3D> m_axisXVertices;
+    QVector<QVector3D> m_axisYVertices;
+    QVector<QVector3D> m_axisZVertices;
+    QVector<QVector3D> m_axisNormals;
 };

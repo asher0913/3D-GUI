@@ -24,6 +24,7 @@
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QStyle>
+#include <QSet>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTextStream>
@@ -33,6 +34,7 @@
 #include <QTreeWidgetItem>
 
 #include <algorithm>
+#include <functional>
 #include <limits>
 #include <utility>
 
@@ -113,6 +115,49 @@ bool readFlatConfigYaml(const QString& path, QMap<QString, QString>* values, QSt
         return false;
     }
     return true;
+}
+
+bool isUiManagedConfigKey(const QString& key)
+{
+    static const QSet<QString> exactKeys = {
+        QStringLiteral("machine_name"),
+        QStringLiteral("material_num"),
+        QStringLiteral("material_count"),
+        QStringLiteral("output_width"),
+        QStringLiteral("output_height"),
+        QStringLiteral("res_width"),
+        QStringLiteral("res_height"),
+        QStringLiteral("projector_width"),
+        QStringLiteral("projector_height"),
+        QStringLiteral("pixel_size_mm"),
+        QStringLiteral("layer_height"),
+        QStringLiteral("bottom_layers"),
+        QStringLiteral("output_dir"),
+        QStringLiteral("groove"),
+        QStringLiteral("slide_0"),
+        QStringLiteral("slide_1"),
+        QStringLiteral("slide_2"),
+    };
+    if (exactKeys.contains(key)) {
+        return true;
+    }
+
+    static const QStringList prefixes = {
+        QStringLiteral("img_path_"),
+        QStringLiteral("bottom_exposure_time_"),
+        QStringLiteral("bottom_exposure_current_"),
+        QStringLiteral("bottom_exposure_strength_"),
+        QStringLiteral("standard_exposure_time_"),
+        QStringLiteral("standard_exposure_current_"),
+        QStringLiteral("standard_exposure_strength_"),
+        QStringLiteral("material_preset_"),
+    };
+    for (const QString& prefix : prefixes) {
+        if (key.startsWith(prefix)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool configBool(const QMap<QString, QString>& values, const QString& key, bool fallback)
@@ -241,7 +286,10 @@ MainWindow::MainWindow(QWidget* parent)
     QStringList startupStepFiles;
     const QStringList args = QCoreApplication::arguments();
     for (int i = 1; i < args.size(); ++i) {
-        if (args[i].endsWith(QStringLiteral(".stl"), Qt::CaseInsensitive)) {
+        if ((args[i] == QStringLiteral("--config") || args[i] == QStringLiteral("--preset-config"))
+            && i + 1 < args.size()) {
+            m_configPathOverride = args[++i];
+        } else if (args[i].endsWith(QStringLiteral(".stl"), Qt::CaseInsensitive)) {
             startupStlFiles.append(args[i]);
         } else if (args[i].endsWith(QStringLiteral(".step"), Qt::CaseInsensitive)
                    || args[i].endsWith(QStringLiteral(".stp"), Qt::CaseInsensitive)) {
@@ -379,19 +427,16 @@ QStringList MainWindow::candidateConfigPaths() const
     const QString resourcesDir = QDir(appDir).absoluteFilePath(QStringLiteral("../Resources"));
 
     QStringList paths;
+    if (!m_configPathOverride.trimmed().isEmpty()) {
+        paths << m_configPathOverride.trimmed();
+    }
+#ifdef PRESET_CONFIG_PATH
+    paths << QString::fromUtf8(PRESET_CONFIG_PATH);
+#endif
     paths << QDir(resourcesDir).absoluteFilePath(QStringLiteral("machine_material_presets.yaml"));
     paths << QDir(appDir).absoluteFilePath(QStringLiteral("machine_material_presets.yaml"));
     paths << QDir(appDir).absoluteFilePath(QStringLiteral("machine_material_presets.yml"));
     paths << QDir(appDir).absoluteFilePath(QStringLiteral("config/machine_material_presets.yaml"));
-
-    // Any .yaml / .yml sitting next to the executable or in Resources.
-    const QStringList nameFilters { QStringLiteral("*.yaml"), QStringLiteral("*.yml") };
-    for (const QString& f : QDir(resourcesDir).entryList(nameFilters, QDir::Files, QDir::Name)) {
-        paths << QDir(resourcesDir).absoluteFilePath(f);
-    }
-    for (const QString& f : QDir(appDir).entryList(nameFilters, QDir::Files, QDir::Name)) {
-        paths << QDir(appDir).absoluteFilePath(f);
-    }
 
     // Development locations (running from the source tree / build dir).
     paths << QDir(cwd).absoluteFilePath(QStringLiteral("config/machine_material_presets.yaml"));
@@ -589,12 +634,21 @@ QString MainWindow::defaultPythonPath() const
     if (QFileInfo::exists(bundledPython)) {
         return bundledPython;
     }
-    return QStringLiteral("python");
+    const QString foundPython = QStandardPaths::findExecutable(QStringLiteral("python"));
+    return foundPython.isEmpty() ? QStringLiteral("python") : foundPython;
 #else
+    const QString foundPython3 = QStandardPaths::findExecutable(QStringLiteral("python3"));
+    if (!foundPython3.isEmpty()) {
+        return foundPython3;
+    }
     const QStringList candidates {
+        QStringLiteral("/opt/homebrew/opt/python@3.13/bin/python3.13"),
         QStringLiteral("/opt/homebrew/opt/python@3.12/bin/python3.12"),
+        QStringLiteral("/opt/homebrew/opt/python@3.11/bin/python3.11"),
         QStringLiteral("/opt/homebrew/bin/python3"),
+        QStringLiteral("/opt/homebrew/bin/python"),
         QStringLiteral("/usr/local/bin/python3"),
+        QStringLiteral("/usr/local/bin/python"),
         QStringLiteral("/usr/bin/python3"),
     };
     for (const QString& candidate : candidates) {
@@ -843,12 +897,14 @@ QMap<QString, QString> MainWindow::collectAdvancedParamsFromTable() const
 void MainWindow::applyAdvancedParamsToTable(const QMap<QString, QString>& values)
 {
     QTableWidget* table = ui->advancedParamTable;
+    QSet<QString> existingKeys;
     for (int row = 0; row < table->rowCount(); ++row) {
         const QTableWidgetItem* keyItem = table->item(row, 0);
         if (!keyItem) {
             continue;
         }
         const QString key = keyItem->text().trimmed();
+        existingKeys.insert(key);
         if (!values.contains(key)) {
             continue;
         }
@@ -858,6 +914,18 @@ void MainWindow::applyAdvancedParamsToTable(const QMap<QString, QString>& values
             table->setItem(row, 1, valueItem);
         }
         valueItem->setText(values.value(key));
+    }
+
+    for (auto it = values.constBegin(); it != values.constEnd(); ++it) {
+        const QString key = it.key().trimmed();
+        if (key.isEmpty() || existingKeys.contains(key) || isUiManagedConfigKey(key)) {
+            continue;
+        }
+        const int row = table->rowCount();
+        table->insertRow(row);
+        table->setItem(row, 0, new QTableWidgetItem(key));
+        table->setItem(row, 1, new QTableWidgetItem(it.value()));
+        existingKeys.insert(key);
     }
 }
 
@@ -1017,12 +1085,31 @@ void MainWindow::importModels()
 
 void MainWindow::importStepAssembly()
 {
-    const QString path = QFileDialog::getOpenFileName(
-        this,
-        QStringLiteral("Import STEP"),
-        QDir::homePath(),
-        QStringLiteral("STEP files (*.step *.stp);;All files (*)"));
+    QFileDialog dialog(this, QStringLiteral("Import STEP"), QDir::homePath());
+    dialog.setFileMode(QFileDialog::ExistingFile);
+    dialog.setAcceptMode(QFileDialog::AcceptOpen);
+    dialog.setNameFilters(QStringList()
+                          << QStringLiteral("STEP files (*.step *.stp)")
+                          << QStringLiteral("All files (*)"));
+    // macOS' native panel can gray out valid .step files when LaunchServices
+    // has not associated the extension with the selected filter. The Qt dialog
+    // filters by suffix directly, so .step and .stp remain selectable.
+    dialog.setOption(QFileDialog::DontUseNativeDialog, true);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    const QStringList selectedFiles = dialog.selectedFiles();
+    const QString path = selectedFiles.isEmpty() ? QString() : selectedFiles.first();
     if (path.isEmpty()) {
+        return;
+    }
+
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    if (suffix != QStringLiteral("step") && suffix != QStringLiteral("stp")) {
+        QMessageBox::warning(
+            this,
+            QStringLiteral("文件格式不支持"),
+            QStringLiteral("请选择 .step 或 .stp 格式的 STEP 装配体文件。"));
         return;
     }
 
@@ -1142,45 +1229,100 @@ int MainWindow::importStepAssemblyFile(const QString& path)
     }
 
     const QJsonObject root = doc.object();
-    const QJsonArray parts = root.value(QStringLiteral("parts")).toArray();
-    if (parts.isEmpty()) {
+    const QJsonArray partsArray = root.value(QStringLiteral("parts")).toArray();
+    if (partsArray.isEmpty()) {
         appendLog(QStringLiteral("STEP 文件没有可导入的实体。"));
         return 0;
     }
 
+    // Build a list of part entries with their full paths.
+    struct PartEntry {
+        QString name;
+        QString stlFileName;
+        QStringList path;
+    };
+    QVector<PartEntry> entries;
+    entries.reserve(partsArray.size());
+    for (int i = 0; i < partsArray.size(); ++i) {
+        const QJsonObject part = partsArray.at(i).toObject();
+        PartEntry e;
+        e.name = part.value(QStringLiteral("name")).toString();
+        e.stlFileName = part.value(QStringLiteral("stl")).toString();
+        const QJsonArray pathArr = part.value(QStringLiteral("path")).toArray();
+        for (const QJsonValue& v : pathArr) {
+            e.path.append(v.toString());
+        }
+        if (!e.path.isEmpty()) {
+            entries.append(e);
+        }
+    }
+
+    // Sort by path length so parent containers are processed before children.
+    std::sort(entries.begin(), entries.end(), [](const PartEntry& a, const PartEntry& b) {
+        return a.path.size() < b.path.size();
+    });
+
+    auto pathKey = [](const QStringList& p) -> QString {
+        return p.join(QStringLiteral("\x1f"));
+    };
+
+    // Create the root assembly.
+    const QString rootAssemblyId = QStringLiteral("step_%1").arg(m_nextAssemblyId++);
+    const QString assemblyName = root.value(QStringLiteral("assembly")).toString(QFileInfo(path).fileName());
+    m_assemblyTransforms.insert(rootAssemblyId, Transform());
+    m_assemblyNames.insert(rootAssemblyId, assemblyName);
+    m_assemblyOrder.append(rootAssemblyId);
+
+    // Map from path key → assembly ID for non-leaf nodes.
+    QMap<QString, QString> pathToAssemblyId;
+    pathToAssemblyId.insert(pathKey({assemblyName}), rootAssemblyId);
+
     QVector<ModelInstance> importedModels;
-    importedModels.reserve(parts.size());
-    for (int i = 0; i < parts.size(); ++i) {
-        const QJsonObject part = parts.at(i).toObject();
-        QString stlPath = part.value(QStringLiteral("stl")).toString();
-        if (stlPath.isEmpty()) {
-            stlPath = part.value(QStringLiteral("file")).toString();
-        }
-        if (stlPath.isEmpty()) {
-            appendLog(QStringLiteral("STEP 子实体 %1 缺少 STL 路径，已跳过。").arg(i + 1));
-            continue;
-        }
-        if (QDir::isRelativePath(stlPath)) {
-            stlPath = QDir(outputDir).absoluteFilePath(stlPath);
-        }
 
-        QString error;
-        QSharedPointer<StlMesh> mesh = QSharedPointer<StlMesh>::create();
-        if (!mesh->load(stlPath, &error)) {
-            appendLog(QStringLiteral("无法读取 STEP 子实体 STL %1: %2").arg(stlPath, error));
+    for (const PartEntry& entry : entries) {
+        // Determine parent from path (everything except last element).
+        QStringList parentPath = entry.path.mid(0, entry.path.size() - 1);
+        QString parentId = pathToAssemblyId.value(pathKey(parentPath));
+
+        // If parent not found (should not happen after sorting), skip.
+        if (parentId.isEmpty()) {
             continue;
         }
 
-        ModelInstance model;
-        model.id = QStringLiteral("model_%1").arg(m_nextModelId++);
-        model.filePath = stlPath;
-        model.name = part.value(QStringLiteral("name")).toString(
-            QStringLiteral("SOLID-%1").arg(importedModels.size() + 1));
-        model.mesh = mesh;
-        model.materialIndex = 0;
-        model.color = materialColorForSlot(0);
-        model.isAssemblyChild = true;
-        importedModels.append(model);
+        if (!entry.stlFileName.isEmpty()) {
+            // --- Leaf solid: load STL and create ModelInstance ---
+            QString stlPath = entry.stlFileName;
+            if (QDir::isRelativePath(stlPath)) {
+                stlPath = QDir(outputDir).absoluteFilePath(stlPath);
+            }
+
+            QString error;
+            QSharedPointer<StlMesh> mesh = QSharedPointer<StlMesh>::create();
+            if (!mesh->load(stlPath, &error)) {
+                appendLog(QStringLiteral("无法读取 STEP 子实体 STL %1: %2").arg(stlPath, error));
+                continue;
+            }
+
+            ModelInstance model;
+            model.id = QStringLiteral("model_%1").arg(m_nextModelId++);
+            model.filePath = stlPath;
+            model.name = entry.name;
+            model.mesh = mesh;
+            model.materialIndex = 0;
+            model.color = materialColorForSlot(0);
+            model.isAssemblyChild = true;
+            model.assemblyId = parentId;
+            model.assemblyName = m_assemblyNames.value(parentId);
+            model.hasEffectiveMatrixOverride = true;
+            importedModels.append(model);
+        } else {
+            // --- Sub-assembly container: create new assembly as child of parent ---
+            QString subAssemblyId = QStringLiteral("step_%1").arg(m_nextAssemblyId++);
+            m_assemblyTransforms.insert(subAssemblyId, Transform());
+            m_assemblyNames.insert(subAssemblyId, entry.name);
+            m_assemblyChildren[parentId].append(subAssemblyId);
+            pathToAssemblyId.insert(pathKey(entry.path), subAssemblyId);
+        }
     }
 
     if (importedModels.isEmpty()) {
@@ -1190,22 +1332,13 @@ int MainWindow::importStepAssemblyFile(const QString& path)
 
     normalizeMeshesTogether(&importedModels);
 
-    const QString assemblyId = QStringLiteral("step_%1").arg(m_nextAssemblyId++);
-    const QString assemblyName = root.value(QStringLiteral("assembly")).toString(QFileInfo(path).fileName());
-    Transform assemblyTransform;
-    m_assemblyTransforms.insert(assemblyId, assemblyTransform);
-    m_assemblyNames.insert(assemblyId, assemblyName);
-    m_assemblyOrder.append(assemblyId);
-
-    for (ModelInstance& model : importedModels) {
-        model.assemblyId = assemblyId;
-        model.assemblyName = assemblyName;
-        model.transform = assemblyTransform;
+    for (const ModelInstance& model : importedModels) {
         m_models.append(model);
     }
+    refreshAssemblyTransforms();
 
     refreshModelList();
-    setModelTreeCurrentAssembly(assemblyId);
+    setModelTreeCurrentAssembly(rootAssemblyId);
     loadSelectedModelToControls();
     ui->glView->update();
     appendLog(QStringLiteral("已导入 STEP 装配体 %1，子实体 %2 个").arg(assemblyName).arg(importedModels.size()));
@@ -1216,30 +1349,44 @@ void MainWindow::duplicateSelectedModel()
 {
     const QString assemblyId = selectedAssemblyId();
     if (!assemblyId.isEmpty()) {
-        const QString baseName = m_assemblyNames.value(assemblyId, QStringLiteral("STEP 装配体"));
-        const QString newAssemblyId = QStringLiteral("step_%1").arg(m_nextAssemblyId++);
-        const QString newName = baseName + QStringLiteral(" 副本");
-        m_assemblyTransforms.insert(newAssemblyId, m_assemblyTransforms.value(assemblyId));
-        m_assemblyNames.insert(newAssemblyId, newName);
-        m_assemblyOrder.append(newAssemblyId);
+        std::function<QString(const QString&, const QString&)> duplicateAssemblyRecursive;
+        duplicateAssemblyRecursive = [&](const QString& sourceId, const QString& newName) -> QString {
+            const QString newAssemblyId = QStringLiteral("step_%1").arg(m_nextAssemblyId++);
+            m_assemblyTransforms.insert(newAssemblyId, m_assemblyTransforms.value(sourceId));
+            m_assemblyNames.insert(newAssemblyId, newName);
 
-        int copied = 0;
-        for (const ModelInstance& model : std::as_const(m_models)) {
-            if (!model.isAssemblyChild || model.assemblyId != assemblyId) {
-                continue;
+            int copied = 0;
+            for (const ModelInstance& model : std::as_const(m_models)) {
+                if (!model.isAssemblyChild || model.assemblyId != sourceId) {
+                    continue;
+                }
+                ModelInstance copy = model;
+                copy.id = QStringLiteral("model_%1").arg(m_nextModelId++);
+                copy.assemblyId = newAssemblyId;
+                copy.assemblyName = newName;
+                m_models.append(copy);
+                ++copied;
             }
-            ModelInstance copy = model;
-            copy.id = QStringLiteral("model_%1").arg(m_nextModelId++);
-            copy.assemblyId = newAssemblyId;
-            copy.assemblyName = newName;
-            m_models.append(copy);
-            ++copied;
-        }
+
+            for (const QString& childAssemblyId : m_assemblyChildren.value(sourceId)) {
+                const QString childName = m_assemblyNames.value(childAssemblyId) + QStringLiteral(" 副本");
+                const QString newChildId = duplicateAssemblyRecursive(childAssemblyId, childName);
+                m_assemblyChildren[newAssemblyId].append(newChildId);
+            }
+
+            return newAssemblyId;
+        };
+
+        const QString baseName = m_assemblyNames.value(assemblyId, QStringLiteral("STEP 装配体"));
+        const QString newName = baseName + QStringLiteral(" 副本");
+        const QString newAssemblyId = duplicateAssemblyRecursive(assemblyId, newName);
+        m_assemblyOrder.append(newAssemblyId);
+        refreshAssemblyTransforms();
 
         refreshModelList();
         setModelTreeCurrentAssembly(newAssemblyId);
         loadSelectedModelToControls();
-        appendLog(QStringLiteral("已复制 STEP 装配体: %1 (%2 个子实体)").arg(newName).arg(copied));
+        appendLog(QStringLiteral("已复制 STEP 装配体: %1").arg(newName));
         ui->glView->update();
         return;
     }
@@ -1269,6 +1416,7 @@ void MainWindow::duplicateSelectedModel()
     copy.isAssemblyChild = false;
     copy.assemblyId.clear();
     copy.assemblyName.clear();
+    copy.hasEffectiveMatrixOverride = false;
 
     m_models.append(copy);
     refreshModelList();
@@ -1301,15 +1449,25 @@ void MainWindow::removeSelectedModel()
     if (!childAssemblyId.isEmpty()) {
         bool hasSibling = false;
         for (const ModelInstance& model : std::as_const(m_models)) {
-            if (model.assemblyId == childAssemblyId) {
+            if (model.isAssemblyChild && model.assemblyId == childAssemblyId) {
                 hasSibling = true;
                 break;
             }
         }
         if (!hasSibling) {
-            m_assemblyTransforms.remove(childAssemblyId);
-            m_assemblyNames.remove(childAssemblyId);
-            m_assemblyOrder.removeAll(childAssemblyId);
+            std::function<bool(const QString&)> hasDescendantModels;
+            hasDescendantModels = [&](const QString& id) -> bool {
+                for (const QString& childId : m_assemblyChildren.value(id)) {
+                    for (const ModelInstance& model : m_models) {
+                        if (model.isAssemblyChild && model.assemblyId == childId) return true;
+                    }
+                    if (hasDescendantModels(childId)) return true;
+                }
+                return false;
+            };
+            if (!hasDescendantModels(childAssemblyId)) {
+                removeAssembly(childAssemblyId);
+            }
         }
     }
     refreshModelList();
@@ -1334,7 +1492,7 @@ void MainWindow::selectedModelEdited()
     if (!assemblyId.isEmpty()) {
         const Transform transform = transformFromUi(ui);
         m_assemblyTransforms[assemblyId] = transform;
-        applyAssemblyTransform(assemblyId, transform);
+        refreshAssemblyTransforms();
         refreshModelList();
         setModelTreeCurrentAssembly(assemblyId);
         ui->glView->update();
@@ -1515,41 +1673,79 @@ void MainWindow::refreshModelList()
         return item;
     };
 
-    QStringList renderedAssemblies;
-    auto hasAssemblyModels = [this](const QString& assemblyId) {
-        for (const ModelInstance& model : m_models) {
-            if (model.isAssemblyChild && model.assemblyId == assemblyId) {
-                return true;
-            }
-        }
-        return false;
-    };
-
-    for (const QString& assemblyId : std::as_const(m_assemblyOrder)) {
-        if (!hasAssemblyModels(assemblyId)) {
-            continue;
-        }
+    // Helper that collects all assembly IDs that are descendants of a given root
+    // (including the root itself).
+    QSet<QString> renderedAssemblies;
+    std::function<void(const QString&, QTreeWidgetItem*)> addAssemblyRecursive;
+    addAssemblyRecursive = [&](const QString& assemblyId, QTreeWidgetItem* parentTreeItem) {
+        renderedAssemblies.insert(assemblyId);
         auto* assemblyItem = new QTreeWidgetItem();
         assemblyItem->setText(0, m_assemblyNames.value(assemblyId, QStringLiteral("STEP 装配体")));
         assemblyItem->setData(0, ItemKindRole, ItemKindAssembly);
         assemblyItem->setData(0, AssemblyIdRole, assemblyId);
-        ui->modelList->addTopLevelItem(assemblyItem);
-        renderedAssemblies.append(assemblyId);
+        if (parentTreeItem) {
+            parentTreeItem->addChild(assemblyItem);
+        } else {
+            ui->modelList->addTopLevelItem(assemblyItem);
+        }
 
+        // Add direct child models.
         for (int i = 0; i < m_models.size(); ++i) {
             const ModelInstance& model = m_models[i];
             if (model.isAssemblyChild && model.assemblyId == assemblyId) {
                 addModelItem(assemblyItem, i);
             }
         }
+
+        // Recurse into child assemblies.
+        for (const QString& childId : m_assemblyChildren.value(assemblyId)) {
+            addAssemblyRecursive(childId, assemblyItem);
+        }
+    };
+
+    // Render root-level assemblies (those in m_assemblyOrder).
+    for (const QString& assemblyId : std::as_const(m_assemblyOrder)) {
+        // Check that the assembly or any descendant still has models.
+        bool hasLiveModels = false;
+        std::function<void(const QString&)> checkRecursive;
+        checkRecursive = [&](const QString& id) {
+            for (const ModelInstance& model : m_models) {
+                if (model.isAssemblyChild && model.assemblyId == id) {
+                    hasLiveModels = true;
+                    return;
+                }
+            }
+            for (const QString& childId : m_assemblyChildren.value(id)) {
+                checkRecursive(childId);
+                if (hasLiveModels) return;
+            }
+        };
+        checkRecursive(assemblyId);
+        if (!hasLiveModels) {
+            continue;
+        }
+        addAssemblyRecursive(assemblyId, nullptr);
     }
 
+    // Also handle assemblies not yet in m_assemblyOrder (orphaned during
+    // existing code paths).
+    QSet<QString> allAssemblyIds;
+    for (const ModelInstance& model : m_models) {
+        if (model.isAssemblyChild && !model.assemblyId.isEmpty()) {
+            allAssemblyIds.insert(model.assemblyId);
+        }
+    }
+    for (const QString& id : allAssemblyIds) {
+        if (!renderedAssemblies.contains(id)) {
+            m_assemblyOrder.append(id);
+            addAssemblyRecursive(id, nullptr);
+        }
+    }
+
+    // Individual (non-assembly) models.
     for (int i = 0; i < m_models.size(); ++i) {
         const ModelInstance& model = m_models[i];
         if (model.isAssemblyChild) {
-            if (!renderedAssemblies.contains(model.assemblyId)) {
-                m_assemblyOrder.append(model.assemblyId);
-            }
             continue;
         }
         addModelItem(nullptr, i);
@@ -1596,13 +1792,25 @@ void MainWindow::setModelTreeCurrentAssembly(const QString& assemblyId)
     if (assemblyId.isEmpty()) {
         return;
     }
-    for (int i = 0; i < ui->modelList->topLevelItemCount(); ++i) {
-        QTreeWidgetItem* item = ui->modelList->topLevelItem(i);
-        if (item->data(0, ItemKindRole).toInt() == ItemKindAssembly
-            && item->data(0, AssemblyIdRole).toString() == assemblyId) {
-            ui->modelList->setCurrentItem(item);
-            return;
+
+    std::function<QTreeWidgetItem*(QTreeWidgetItem*)> findRecursive;
+    findRecursive = [&](QTreeWidgetItem* parent) -> QTreeWidgetItem* {
+        const int count = parent ? parent->childCount() : ui->modelList->topLevelItemCount();
+        for (int i = 0; i < count; ++i) {
+            QTreeWidgetItem* item = parent ? parent->child(i) : ui->modelList->topLevelItem(i);
+            if (item->data(0, ItemKindRole).toInt() == ItemKindAssembly
+                && item->data(0, AssemblyIdRole).toString() == assemblyId) {
+                return item;
+            }
+            if (auto* found = findRecursive(item)) {
+                return found;
+            }
         }
+        return static_cast<QTreeWidgetItem*>(nullptr);
+    };
+
+    if (auto* item = findRecursive(nullptr)) {
+        ui->modelList->setCurrentItem(item);
     }
 }
 
@@ -1674,17 +1882,59 @@ void MainWindow::setTransformEditorsEnabled(bool enabled)
     ui->scaleSpin->setEnabled(enabled);
 }
 
-void MainWindow::applyAssemblyTransform(const QString& assemblyId, const Transform& transform)
+void MainWindow::refreshAssemblyTransforms()
 {
     for (ModelInstance& model : m_models) {
-        if (model.isAssemblyChild && model.assemblyId == assemblyId) {
-            model.transform = transform;
+        if (!model.isAssemblyChild) {
+            model.hasEffectiveMatrixOverride = false;
         }
+    }
+
+    QSet<QString> childAssemblies;
+    for (auto it = m_assemblyChildren.cbegin(); it != m_assemblyChildren.cend(); ++it) {
+        for (const QString& childId : it.value()) {
+            childAssemblies.insert(childId);
+        }
+    }
+
+    QMatrix4x4 identity;
+    QSet<QString> visited;
+    for (const QString& assemblyId : std::as_const(m_assemblyOrder)) {
+        if (m_assemblyTransforms.contains(assemblyId)) {
+            refreshAssemblyTransformsRecursive(assemblyId, identity);
+            visited.insert(assemblyId);
+        }
+    }
+
+    for (auto it = m_assemblyTransforms.cbegin(); it != m_assemblyTransforms.cend(); ++it) {
+        const QString assemblyId = it.key();
+        if (!visited.contains(assemblyId) && !childAssemblies.contains(assemblyId)) {
+            refreshAssemblyTransformsRecursive(assemblyId, identity);
+        }
+    }
+}
+
+void MainWindow::refreshAssemblyTransformsRecursive(const QString& assemblyId, const QMatrix4x4& parentMatrix)
+{
+    const QMatrix4x4 effectiveMatrix = parentMatrix * m_assemblyTransforms.value(assemblyId).matrix();
+    for (ModelInstance& model : m_models) {
+        if (model.isAssemblyChild && model.assemblyId == assemblyId) {
+            model.hasEffectiveMatrixOverride = true;
+            model.effectiveMatrixOverride = effectiveMatrix;
+        }
+    }
+    for (const QString& childAssemblyId : m_assemblyChildren.value(assemblyId)) {
+        refreshAssemblyTransformsRecursive(childAssemblyId, effectiveMatrix);
     }
 }
 
 void MainWindow::removeAssembly(const QString& assemblyId)
 {
+    for (const QString& childAssemblyId : m_assemblyChildren.value(assemblyId)) {
+        removeAssembly(childAssemblyId);
+    }
+    m_assemblyChildren.remove(assemblyId);
+
     for (int i = m_models.size() - 1; i >= 0; --i) {
         if (m_models[i].isAssemblyChild && m_models[i].assemblyId == assemblyId) {
             m_models.removeAt(i);
@@ -1693,6 +1943,10 @@ void MainWindow::removeAssembly(const QString& assemblyId)
     m_assemblyTransforms.remove(assemblyId);
     m_assemblyNames.remove(assemblyId);
     m_assemblyOrder.removeAll(assemblyId);
+
+    for (auto it = m_assemblyChildren.begin(); it != m_assemblyChildren.end(); ++it) {
+        it.value().removeAll(assemblyId);
+    }
 }
 
 void MainWindow::appendLog(const QString& text)
@@ -1738,6 +1992,15 @@ void MainWindow::runWorkflow()
     }
     if (m_models.isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("没有模型"), QStringLiteral("请先导入至少一个 STL 或 STEP 模型。"));
+        return;
+    }
+    const bool hasVisibleMesh = std::any_of(m_models.cbegin(), m_models.cend(), [](const ModelInstance& model) {
+        return model.visible && model.mesh && !model.mesh->isEmpty();
+    });
+    if (!hasVisibleMesh) {
+        QMessageBox::warning(this,
+                             QStringLiteral("没有可见模型"),
+                             QStringLiteral("所有模型均已隐藏或为空，请先显示至少一个有效模型。"));
         return;
     }
 

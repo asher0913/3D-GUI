@@ -385,14 +385,42 @@ The regenerated macOS zip is:
 
 ```text
 dist/MultiMaterialSlicer-mac-x86_64.zip
-SHA-256: 63a27431bb87b678ac7c4400f7ae99e493c91fc6704a6ffc2706416dbaf1b3e3
+SHA-256: 33512d426ae6e137f23b82d851f5893f4cc32ecdd3b9d2c58b0a425e394e644a
 ```
 
-## 16. Current Risks and Follow-Ups
+## 16. Medium Audit Fixes
+
+The 2026-06-30 medium-priority audit was reviewed against the current codebase. The following actionable issues were fixed:
+
+- Material transition output is no longer hard-coded only. Global defaults can be configured through `material_transition_enabled`, `material_transition_current`, and `material_transition_time`; imported per-pair keys such as `m0Tom1_current` are preserved and used when writing `config.yaml`.
+- Binary STL detection now prefers structurally valid binary files, so a binary STL header containing `facet` or `vertex` is not misparsed as ASCII.
+- The STL preview loader rejects files larger than 512 MB before `readAll()`, reducing OOM risk for accidental huge files.
+- Preset numeric parsing now validates `toInt()` / `toDouble()` results and rejects invalid dimensions, pixel sizes, material limits, and mismatched current/strength maps.
+- `runWorkflow()` now checks for at least one visible non-empty model before starting.
+- Development Python lookup now uses `QStandardPaths::findExecutable("python3")` first, then falls back through multiple Homebrew/system candidates.
+- The preset library lookup supports `--config` / `--preset-config` and a CMake-provided `PRESET_CONFIG_PATH`; it no longer scans arbitrary adjacent YAML files.
+- Build-plate surface, grid, border, and axis geometry are cached and only regenerated when the plate size changes.
+- Slice export reuses one grayscale `QImage` per material instead of reallocating an image for every layer/material pair.
+- Assembly/model ID counters use 64-bit counters.
+
+Items judged valid but intentionally left as product-level follow-ups rather than small bug fixes:
+
+- Project save/load.
+- Undo/redo.
+- Moving self-test code into a dedicated test target.
+- Full `tr()`/Qt Linguist internationalization.
+- A formal unit-test suite.
+
+## 17. Current Risks and Follow-Ups
 
 Remaining engineering follow-ups:
 
 - Validate the Windows package on an actual Windows machine.
+- Add project save/load for iterative work sessions.
+- Add undo/redo for destructive and transform/material operations.
+- Split `--selftest` into a dedicated test harness or Qt Test target when the codebase moves beyond demo stage.
+- Add full Qt internationalization if English/Japanese/Korean users become a delivery target.
+- Add formal unit tests for `StlMesh`, `PresetLoader`, `ConfigWriter`, `SliceExporter`, and strength/current interpolation.
 - Decide whether macOS should ship x86_64 only, arm64 only, or universal.
 - If distributing STEP import to Intel Mac users, rebuild `step_to_stl_parts` under an x86_64 Python environment. The helper built on this Apple Silicon machine is arm64 and has been validated on Apple Silicon.
 - Add formal installer/signing/notarization for production distribution.
@@ -401,6 +429,6 @@ Remaining engineering follow-ups:
 - Strengthen the slicer geometry algorithm if production accuracy requirements exceed the current lightweight implementation.
 - Add repeatable GUI automation that does not depend on native OS file dialogs.
 
-## 17. Conclusion
+## 18. Conclusion
 
 The current implementation satisfies the requested integrated demo workflow: a Qt/C++ APP with editable `.ui`, OpenGL STL/STEP preview, per-model transform/material control, STEP parent/child tree behavior, adjustable material count, model duplication, YAML machine/material presets, config import, editable advanced machine/GCode parameters, per-material PNG export, backend command-line invocation, generated `config.yaml`, generated `run.gcode`, macOS packaging, and actual GUI validation.

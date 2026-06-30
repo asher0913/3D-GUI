@@ -8,6 +8,7 @@ MultiMaterialSlicer 是一个面向多材料光固化打印机的 Qt/C++ 桌面 
 
 - 左侧 3D 视图可以显示多个 STL 模型，也可以导入 STEP/STP 装配体。
 - 3D 视图使用 OpenGL VBO 缓存网格数据，模型加载后不会在每帧重复上传全部顶点。
+- 底板网格/边框/坐标轴几何会缓存，只有构建平台尺寸变化时才重建。
 - STEP 导入会拆出多个子实体，在模型树中显示为“STEP 文件父节点 -> 子实体叶子节点”。
 - 选中 STEP 父节点时，平移、旋转、缩放会作为整体应用到所有子实体；选中子实体时，可以单独设置材料，但不单独破坏装配体相对位置。
 - 选中模型后可以在右侧输入平移、旋转、等比例缩放数值。
@@ -18,10 +19,13 @@ MultiMaterialSlicer 是一个面向多材料光固化打印机的 Qt/C++ 桌面 
 - 切片页顶部包含打印设置，模型页只保留模型导入、选择、复制、删除和变换。
 - 切片常规选项包含“挡板 (groove)”和“刮板1/2/3 (slide_0/1/2)”。
 - 切片高级选项包含 `max_height`、`z_acc_h`、`clean_tank`、`dry_tank`、`drop_time_bottom`、`ASS_times` 等后端机器/GCode 参数。
+- 材料转换默认参数可以在高级选项里通过 `material_transition_enabled`、`material_transition_current`、`material_transition_time` 配置；从 `config.yaml` 导入的 `m0Tom1_current` 等单向转换参数也会保留并写出。
 - 可以从手动编辑的 `config.yaml` 导入参数，回填打印设置、曝光设置、常规选项和高级选项。
 - 后端以命令行工具形式运行：macOS 为 `slice_merge_tool`，Windows 为 `slice_merge_tool.exe`。开发模式仍保留 `slice_1080p.py --config ... --output ...`。
 - 切片和后端执行过程有进度反馈、取消按钮和后端超时保护，后端工具挂起时不会无限等待。
 - STL 读取和切片导出会拒绝 NaN/Inf 坐标，并检查二进制 STL 声明三角数，避免异常文件导致崩溃或未定义行为。
+- 预设库数值解析会校验非法数字、0 宽高、0 像素尺寸和映射长度，不会静默把非法值变成 0。
+- STL 读取会优先识别结构合理的二进制 STL，并给预览加载加 512MB 文件上限，避免二进制头注释误判 ASCII 或大文件 OOM。
 - APP 主窗口已经改为可调节大小。
 - 打包脚本会把 Qt 运行库、预设库和后端工具一起放进发布包。
 
@@ -194,6 +198,7 @@ output/
 - 2026-06-29 重新运行 `cmake --build build-x86_64`、`xmllint --noout ui/MainWindow.ui`、`python3 -m py_compile slice_1080p.py tools/step_to_stl_parts.py`、坏 NaN STL 自测、STEP 装配体自测，均通过。
 - 2026-06-29 重新打包 `dist/MultiMaterialSlicer-mac-x86_64.zip`，从最终 zip 解包后运行 `--selftest demo_step/step示例.step` 通过，并通过 `codesign --verify --deep --strict`。
 - 2026-06-29 使用 Computer Use 操作最终解包 APP：通过文件选择器导入 `demo_stl/multi_A_base_plate.stl`，修改材料 1 -> 2 -> 3，修改 X 位移，复制并删除模型，切到切片页，从 GUI 点击“导出切片并生成 GCode”，成功生成 `/Users/asher/MultiMaterialSlicerOutput/config.yaml`、材料 PNG、`merged/run.gcode` 和 102 个 merged 文件。
+- 2026-06-30 对 Medium 清单中可直接落地的项做了修复：材料转换参数可配置、二进制/ASCII STL 判别更稳、预设库非法数值报错、所有模型不可见时阻止运行、Python 查找使用 PATH 和多版本 fallback、底板几何缓存、切片 QImage 复用、STL 大文件上限、配置路径支持 `--config`/编译期路径、装配体/模型 ID 使用 64 位计数。
 
 早期自动化测试中也使用过启动参数导入 STL/STEP 来覆盖同一套导入代码。人工演示时，“导入 STL”和“导入 STEP”按钮会打开系统文件选择器，可以正常选择 `demo_stl` 中的 STL 文件和 `demo_step` 中的 STEP 文件。
 

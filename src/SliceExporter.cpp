@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <utility>
 
 namespace {
 
@@ -231,7 +232,7 @@ bool SliceExporter::exportSlices(const QVector<ModelInstance>& models,
             continue;
         }
         const int material = std::max(0, std::min(settings.materialCount - 1, model.materialIndex));
-        const QMatrix4x4 transform = model.transform.matrix();
+        const QMatrix4x4 transform = model.effectiveMatrix();
         const QVector<QVector3D>& vertices = model.mesh->vertices();
         for (int i = 0; i + 2 < vertices.size(); i += 3) {
             Triangle tri {
@@ -304,6 +305,19 @@ bool SliceExporter::exportSlices(const QVector<ModelInstance>& models,
     }
 
     QVector<int> imageCounts(settings.materialCount, 0);
+    QVector<QImage> reusableImages;
+    reusableImages.reserve(settings.materialCount);
+    for (int material = 0; material < settings.materialCount; ++material) {
+        QImage image(settings.outputWidth, settings.outputHeight, QImage::Format_Grayscale8);
+        if (image.isNull()) {
+            if (errorMessage) {
+                *errorMessage = QStringLiteral("Cannot allocate slice image buffer");
+            }
+            return false;
+        }
+        reusableImages.append(std::move(image));
+    }
+
     for (int layer = 1; layer <= layerCount; ++layer) {
         if (progressCallback && !progressCallback(layer - 1, layerCount)) {
             if (errorMessage) {
@@ -325,7 +339,7 @@ bool SliceExporter::exportSlices(const QVector<ModelInstance>& models,
                 }
             }
 
-            QImage image(settings.outputWidth, settings.outputHeight, QImage::Format_Grayscale8);
+            QImage& image = reusableImages[material];
             image.fill(0);
             rasterizeSegments(&image, segments);
 

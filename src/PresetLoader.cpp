@@ -30,29 +30,35 @@ QStringList splitList(const QString& value)
     return out;
 }
 
-QVector<double> parseDoubleList(const QString& value)
+QVector<double> parseDoubleList(const QString& value, QStringList* errors, const QString& context)
 {
     QVector<double> out;
     const auto parts = value.split(',', QString::SkipEmptyParts);
     for (const QString& part : parts) {
         bool ok = false;
-        const double d = part.trimmed().toDouble(&ok);
-        if (ok) {
+        const QString token = unquote(part);
+        const double d = token.toDouble(&ok);
+        if (ok && std::isfinite(d)) {
             out << d;
+        } else if (errors) {
+            errors->append(QStringLiteral("%1: invalid number '%2'").arg(context, token));
         }
     }
     return out;
 }
 
-QVector<int> parseIntList(const QString& value)
+QVector<int> parseIntList(const QString& value, QStringList* errors, const QString& context)
 {
     QVector<int> out;
     const auto parts = value.split(',', QString::SkipEmptyParts);
     for (const QString& part : parts) {
         bool ok = false;
-        const double d = part.trimmed().toDouble(&ok);
-        if (ok) {
+        const QString token = unquote(part);
+        const double d = token.toDouble(&ok);
+        if (ok && std::isfinite(d)) {
             out << static_cast<int>(std::lround(d));
+        } else if (errors) {
+            errors->append(QStringLiteral("%1: invalid integer '%2'").arg(context, token));
         }
     }
     return out;
@@ -145,8 +151,32 @@ bool PresetLoader::load(const QString& path, PresetLibrary* outLibrary, QString*
     Mode mode = Mode::None;
     MachinePreset* machine = nullptr;
     MaterialPreset* material = nullptr;
+    QStringList errors;
 
-    for (const QString& raw : lines) {
+    auto parseIntField = [&errors](const QString& value, const QString& context, int* target) {
+        bool ok = false;
+        const QString token = unquote(value);
+        const int parsed = token.toInt(&ok);
+        if (!ok) {
+            errors.append(QStringLiteral("%1: invalid integer '%2'").arg(context, token));
+            return;
+        }
+        *target = parsed;
+    };
+
+    auto parseDoubleField = [&errors](const QString& value, const QString& context, double* target) {
+        bool ok = false;
+        const QString token = unquote(value);
+        const double parsed = token.toDouble(&ok);
+        if (!ok || !std::isfinite(parsed)) {
+            errors.append(QStringLiteral("%1: invalid number '%2'").arg(context, token));
+            return;
+        }
+        *target = parsed;
+    };
+
+    for (int lineIndex = 0; lineIndex < lines.size(); ++lineIndex) {
+        const QString& raw = lines[lineIndex];
         const QString trimmed = raw.trimmed();
         if (trimmed.isEmpty() || trimmed.startsWith('#')) {
             continue;
@@ -158,6 +188,7 @@ bool PresetLoader::load(const QString& path, PresetLibrary* outLibrary, QString*
         const QString key = trimmed.left(colon).trimmed();
         const QString value = trimmed.mid(colon + 1).trimmed();
         const bool topLevel = leadingWhitespace(raw) == 0;
+        const QString context = QStringLiteral("line %1 '%2'").arg(lineIndex + 1).arg(key);
 
         if (topLevel) {
             if (key == QStringLiteral("device_name_list") || key == QStringLiteral("material_name_list")) {
@@ -181,19 +212,19 @@ bool PresetLoader::load(const QString& path, PresetLibrary* outLibrary, QString*
         // Nested field.
         if (mode == Mode::Machine && machine) {
             if (key == QStringLiteral("projector_width")) {
-                machine->projectorWidth = value.toInt();
+                parseIntField(value, context, &machine->projectorWidth);
             } else if (key == QStringLiteral("projector_height")) {
-                machine->projectorHeight = value.toInt();
+                parseIntField(value, context, &machine->projectorHeight);
             } else if (key == QStringLiteral("pixel_width")) {
-                machine->pixelWidthMm = value.toDouble();
+                parseDoubleField(value, context, &machine->pixelWidthMm);
             } else if (key == QStringLiteral("pixel_height")) {
-                machine->pixelHeightMm = value.toDouble();
+                parseDoubleField(value, context, &machine->pixelHeightMm);
             } else if (key == QStringLiteral("current_map")) {
-                machine->currentMap = parseIntList(value);
+                machine->currentMap = parseIntList(value, &errors, context);
             } else if (key == QStringLiteral("strength_map")) {
-                machine->strengthMap = parseDoubleList(value);
+                machine->strengthMap = parseDoubleList(value, &errors, context);
             } else if (key == QStringLiteral("material_num_limit")) {
-                machine->materialNumLimit = value.toInt();
+                parseIntField(value, context, &machine->materialNumLimit);
             } else if (key == QStringLiteral("name") || key == QStringLiteral("display_name")) {
                 machine->displayName = unquote(value);
             }
@@ -204,23 +235,68 @@ bool PresetLoader::load(const QString& path, PresetLibrary* outLibrary, QString*
                     material->color = c;
                 }
             } else if (key == QStringLiteral("bottom_exposure_time")) {
-                material->bottomExposureTime = value.toDouble();
+                parseDoubleField(value, context, &material->bottomExposureTime);
             } else if (key == QStringLiteral("standard_exposure_time")) {
-                material->standardExposureTime = value.toDouble();
+                parseDoubleField(value, context, &material->standardExposureTime);
             } else if (key == QStringLiteral("bottom_exposure_strength")) {
-                material->bottomExposureStrength = value.toDouble();
+                parseDoubleField(value, context, &material->bottomExposureStrength);
                 material->hasStrength = true;
             } else if (key == QStringLiteral("standard_exposure_strength")) {
-                material->standardExposureStrength = value.toDouble();
+                parseDoubleField(value, context, &material->standardExposureStrength);
                 material->hasStrength = true;
             } else if (key == QStringLiteral("bottom_exposure_current")) {
-                material->legacyBottomExposureCurrent = static_cast<int>(std::lround(value.toDouble()));
+                double parsed = material->legacyBottomExposureCurrent;
+                parseDoubleField(value, context, &parsed);
+                material->legacyBottomExposureCurrent = static_cast<int>(std::lround(parsed));
             } else if (key == QStringLiteral("standard_exposure_current")) {
-                material->legacyStandardExposureCurrent = static_cast<int>(std::lround(value.toDouble()));
+                double parsed = material->legacyStandardExposureCurrent;
+                parseDoubleField(value, context, &parsed);
+                material->legacyStandardExposureCurrent = static_cast<int>(std::lround(parsed));
             } else if (key == QStringLiteral("name") || key == QStringLiteral("display_name")) {
                 material->displayName = unquote(value);
             }
         }
+    }
+
+    for (const MachinePreset& m : lib.machines) {
+        const QString name = m.id.isEmpty() ? QStringLiteral("<unnamed machine>") : m.id;
+        if (m.projectorWidth <= 0) {
+            errors.append(QStringLiteral("%1: projector_width must be > 0").arg(name));
+        }
+        if (m.projectorHeight <= 0) {
+            errors.append(QStringLiteral("%1: projector_height must be > 0").arg(name));
+        }
+        if (!std::isfinite(m.pixelWidthMm) || m.pixelWidthMm <= 0.0) {
+            errors.append(QStringLiteral("%1: pixel_width must be > 0").arg(name));
+        }
+        if (!std::isfinite(m.pixelHeightMm) || m.pixelHeightMm <= 0.0) {
+            errors.append(QStringLiteral("%1: pixel_height must be > 0").arg(name));
+        }
+        if (m.materialNumLimit <= 0) {
+            errors.append(QStringLiteral("%1: material_num_limit must be > 0").arg(name));
+        }
+        if ((!m.currentMap.isEmpty() || !m.strengthMap.isEmpty()) && !m.hasMap()) {
+            errors.append(QStringLiteral("%1: current_map and strength_map must both exist and have the same length").arg(name));
+        }
+    }
+    for (const MaterialPreset& m : lib.materials) {
+        const QString name = m.id.isEmpty() ? QStringLiteral("<unnamed material>") : m.id;
+        if (!std::isfinite(m.bottomExposureTime) || m.bottomExposureTime < 0.0) {
+            errors.append(QStringLiteral("%1: bottom_exposure_time must be >= 0").arg(name));
+        }
+        if (!std::isfinite(m.standardExposureTime) || m.standardExposureTime < 0.0) {
+            errors.append(QStringLiteral("%1: standard_exposure_time must be >= 0").arg(name));
+        }
+        if (!std::isfinite(m.bottomExposureStrength) || !std::isfinite(m.standardExposureStrength)) {
+            errors.append(QStringLiteral("%1: exposure strength values must be finite").arg(name));
+        }
+    }
+
+    if (!errors.isEmpty()) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("配置文件包含非法数值:\n%1").arg(errors.join(QStringLiteral("\n")));
+        }
+        return false;
     }
 
     if (!lib.isValid()) {

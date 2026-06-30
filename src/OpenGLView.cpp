@@ -38,8 +38,11 @@ void OpenGLView::setSelectedIndex(int index)
 
 void OpenGLView::setBuildPlateSize(double widthMm, double depthMm)
 {
-    m_plateWidthMm = widthMm;
-    m_plateDepthMm = depthMm;
+    if (m_plateWidthMm != widthMm || m_plateDepthMm != depthMm) {
+        m_plateWidthMm = widthMm;
+        m_plateDepthMm = depthMm;
+        m_plateGeometryDirty = true;
+    }
     update();
 }
 
@@ -148,7 +151,7 @@ void OpenGLView::paintGL()
         if (i == m_selectedIndex) {
             color = color.lighter(145);
         }
-        drawModelMesh(*model.mesh, model.transform.matrix(), color);
+        drawModelMesh(*model.mesh, model.effectiveMatrix(), color);
     }
 }
 
@@ -187,55 +190,66 @@ void OpenGLView::drawBackground()
 
 void OpenGLView::drawBuildPlate()
 {
+    updateBuildPlateGeometry();
+
+    drawMesh(m_plateVertices, m_plateNormals, QMatrix4x4(), QColor(38, 44, 54), GL_TRIANGLES);
+    drawMesh(m_gridVertices, m_gridNormals, QMatrix4x4(), QColor(58, 66, 80), GL_LINES);
+    drawMesh(m_borderVertices, m_borderNormals, QMatrix4x4(), QColor(90, 100, 116), GL_LINES);
+    drawMesh(m_axisXVertices, m_axisNormals, QMatrix4x4(), QColor(220, 96, 110), GL_LINES);
+    drawMesh(m_axisYVertices, m_axisNormals, QMatrix4x4(), QColor(110, 200, 130), GL_LINES);
+    drawMesh(m_axisZVertices, m_axisNormals, QMatrix4x4(), QColor(44, 160, 220), GL_LINES);
+}
+
+void OpenGLView::updateBuildPlateGeometry()
+{
+    if (!m_plateGeometryDirty) {
+        return;
+    }
+    m_plateGeometryDirty = false;
+
     const float w = static_cast<float>(m_plateWidthMm * 0.5);
     const float d = static_cast<float>(m_plateDepthMm * 0.5);
     const float z = -0.02f;
 
     // Plate surface.
-    QVector<QVector3D> vertices {
+    m_plateVertices = {
         QVector3D(-w, -d, z), QVector3D(w, -d, z), QVector3D(w, d, z),
         QVector3D(-w, -d, z), QVector3D(w, d, z), QVector3D(-w, d, z),
     };
-    QVector<QVector3D> normals(vertices.size(), QVector3D(0.0f, 0.0f, 1.0f));
-    drawMesh(vertices, normals, QMatrix4x4(), QColor(38, 44, 54), GL_TRIANGLES);
+    m_plateNormals = QVector<QVector3D>(m_plateVertices.size(), QVector3D(0.0f, 0.0f, 1.0f));
 
     // Grid lines every 10mm, drawn just above the surface.
     const float gz = z + 0.01f;
     const float step = 10.0f;
-    QVector<QVector3D> grid;
+    m_gridVertices.clear();
     for (float x = 0.0f; x <= w + 0.001f; x += step) {
-        grid << QVector3D(x, -d, gz) << QVector3D(x, d, gz);
+        m_gridVertices << QVector3D(x, -d, gz) << QVector3D(x, d, gz);
         if (x > 0.0f) {
-            grid << QVector3D(-x, -d, gz) << QVector3D(-x, d, gz);
+            m_gridVertices << QVector3D(-x, -d, gz) << QVector3D(-x, d, gz);
         }
     }
     for (float y = 0.0f; y <= d + 0.001f; y += step) {
-        grid << QVector3D(-w, y, gz) << QVector3D(w, y, gz);
+        m_gridVertices << QVector3D(-w, y, gz) << QVector3D(w, y, gz);
         if (y > 0.0f) {
-            grid << QVector3D(-w, -y, gz) << QVector3D(w, -y, gz);
+            m_gridVertices << QVector3D(-w, -y, gz) << QVector3D(w, -y, gz);
         }
     }
-    QVector<QVector3D> gridNormals(grid.size(), QVector3D(0.0f, 0.0f, 1.0f));
-    drawMesh(grid, gridNormals, QMatrix4x4(), QColor(58, 66, 80), GL_LINES);
+    m_gridNormals = QVector<QVector3D>(m_gridVertices.size(), QVector3D(0.0f, 0.0f, 1.0f));
 
     // Plate border.
-    QVector<QVector3D> border {
+    m_borderVertices = {
         QVector3D(-w, -d, gz), QVector3D(w, -d, gz),
         QVector3D(w, -d, gz), QVector3D(w, d, gz),
         QVector3D(w, d, gz), QVector3D(-w, d, gz),
         QVector3D(-w, d, gz), QVector3D(-w, -d, gz),
     };
-    QVector<QVector3D> borderNormals(border.size(), QVector3D(0.0f, 0.0f, 1.0f));
-    drawMesh(border, borderNormals, QMatrix4x4(), QColor(90, 100, 116), GL_LINES);
+    m_borderNormals = QVector<QVector3D>(m_borderVertices.size(), QVector3D(0.0f, 0.0f, 1.0f));
 
     // Origin axes: X red-ish, Y green-ish, Z accent blue.
-    QVector<QVector3D> axisX { QVector3D(0, 0, 0), QVector3D(step * 1.6f, 0, 0) };
-    QVector<QVector3D> axisY { QVector3D(0, 0, 0), QVector3D(0, step * 1.6f, 0) };
-    QVector<QVector3D> axisZ { QVector3D(0, 0, 0), QVector3D(0, 0, step * 2.4f) };
-    QVector<QVector3D> axisN(2, QVector3D(0.0f, 0.0f, 1.0f));
-    drawMesh(axisX, axisN, QMatrix4x4(), QColor(220, 96, 110), GL_LINES);
-    drawMesh(axisY, axisN, QMatrix4x4(), QColor(110, 200, 130), GL_LINES);
-    drawMesh(axisZ, axisN, QMatrix4x4(), QColor(44, 160, 220), GL_LINES);
+    m_axisXVertices = { QVector3D(0, 0, 0), QVector3D(step * 1.6f, 0, 0) };
+    m_axisYVertices = { QVector3D(0, 0, 0), QVector3D(0, step * 1.6f, 0) };
+    m_axisZVertices = { QVector3D(0, 0, 0), QVector3D(0, 0, step * 2.4f) };
+    m_axisNormals = QVector<QVector3D>(2, QVector3D(0.0f, 0.0f, 1.0f));
 }
 
 void OpenGLView::drawMesh(const QVector<QVector3D>& vertices,

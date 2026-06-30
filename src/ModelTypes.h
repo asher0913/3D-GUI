@@ -35,16 +35,23 @@ struct ModelInstance {
     QString name;
     QSharedPointer<StlMesh> mesh;
     Transform transform;
+    QMatrix4x4 effectiveMatrixOverride;
     int materialIndex = 0;
     QColor color = QColor(44, 160, 220);
     bool visible = true;
+    bool hasEffectiveMatrixOverride = false;
 
     // STEP assemblies are represented as one tree parent plus several leaf
-    // models. Each leaf keeps its own material, while the parent transform is
-    // copied to all leaves so the assembly moves as a single object.
+    // models. Each leaf keeps its own material; nested assembly transforms are
+    // composed into effectiveMatrixOverride for rendering and slicing.
     bool isAssemblyChild = false;
     QString assemblyId;
     QString assemblyName;
+
+    QMatrix4x4 effectiveMatrix() const
+    {
+        return hasEffectiveMatrixOverride ? effectiveMatrixOverride : transform.matrix();
+    }
 };
 
 // Exposure parameters that can differ per material slot.
@@ -115,6 +122,9 @@ inline QVector<AdvancedConfigParam> defaultAdvancedConfigParams()
         { QStringLiteral("wait_after_exposure"), QStringLiteral("0.5"), false },
         { QStringLiteral("wait_before_exposure"), QStringLiteral("0.5"), false },
         { QStringLiteral("finished_clean"), QStringLiteral("false"), false },
+        { QStringLiteral("material_transition_enabled"), QStringLiteral("true"), false },
+        { QStringLiteral("material_transition_current"), QStringLiteral("18"), false },
+        { QStringLiteral("material_transition_time"), QStringLiteral("2.0"), false },
     };
 }
 
